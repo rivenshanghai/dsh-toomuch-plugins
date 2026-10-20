@@ -1,0 +1,9 @@
+# toomuch-plugins DSH plugin — bundle patch: insert the plugin row (deployment-global).
+#
+# The plugin ships from this repository itself (no npm package involved): this
+# row tells the profile to load the package `toomuch-plugins`, which is the
+# repository root. The Host half is src/index.js, the Client half src/client.js.
+# There is nothing to configure — the toggle has no options.
+- insert:
+    - id: toomuch-plugins
+      name: toomuch-plugins

@@ -1,0 +1,57 @@
+{
+  "name": "toomuch-plugins",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Collapses the global panel entries above the workspace in the DSH Web left sidebar into one toggle",
+  "icon": "./icon.svg",
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "sidebar",
+    "plugin",
+    "cordis"
+  ],
+  "homepage": "https://github.com/rivenshanghai/dsh-toomuch-plugins#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rivenshanghai/dsh-toomuch-plugins.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rivenshanghai/dsh-toomuch-plugins/issues"
+  },
+  "files": [
+    "src/index.js",
+    "src/client.js",
+    "cordis.patch.yml",
+    "locale/en.json",
+    "locale/zh.json",
+    "icon.svg"
+  ],
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./src/client.js",
+    "./locale/en.json": "./locale/en.json",
+    "./locale/zh.json": "./locale/zh.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-layout"
+      ]
+    }
+  }
+}

@@ -1,0 +1,33 @@
+name: Feature request / 功能建议
+description: 提议一个新的能力或改进
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        这个插件的设计目标很窄：只收起侧栏里的全局面板入口。
+        所以提议之前先看一眼 [docs/design.md](../blob/main/docs/design.md) 里「范围」一节 ——
+        越界的需求可能更适合别的插件。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does it solve? / 想解决什么问题
+      description: 描述你遇到的实际场景，而不是「加一个 X」。
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution / 期望的方案
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives / 考虑过的其他做法
+    validations:
+      required: false

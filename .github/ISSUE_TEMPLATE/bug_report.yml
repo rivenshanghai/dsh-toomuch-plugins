@@ -1,0 +1,92 @@
+name: Bug report / 缺陷反馈
+description: 插件不生效、按钮没出现、报错等
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！这个插件只做一件事（收起全局面板入口），下面的信息能帮我们快速定位。
+
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DSH version / DSH 版本
+      placeholder: "e.g. 0.9.3"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system / 操作系统
+      placeholder: "e.g. Ubuntu 24.04 / Windows 11 / macOS 15"
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser / 浏览器
+      placeholder: "e.g. Chrome 131"
+    validations:
+      required: true
+
+  - type: input
+    id: profile
+    attributes:
+      label: Profile / 使用的 profile
+      placeholder: "e.g. web"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: What happened? / 现象
+      options:
+        - 侧栏底部根本没有出现开关 / The toggle is missing from the sidebar footer
+        - 开关在，但点击没反应 / The toggle is there but does nothing
+        - 开关点击后状态没记住 / The state is not remembered after reload
+        - 收起后布局错乱 / The layout breaks after collapsing
+        - 页面报错 / The page throws an error
+        - 其他 / Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / 复现步骤
+      description: 从打开 DSH 开始，一步一步写。
+      placeholder: |
+        1. 安装并启用 toomuch-plugins
+        2. 刷新页面
+        3. 点侧栏底部的开关
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior / 期望行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output / 浏览器控制台输出
+      description: 有报错的话把红色那段贴上来。
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks / 自查
+      options:
+        - label: 插件已在插件设置里启用 / The plugin is enabled in the plugin settings
+        - label: 控制台里有报错 / There are errors in the browser console
+        - label: 浏览器是最新版本 / The browser is up to date

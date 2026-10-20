@@ -1,0 +1,7 @@
+blank_issues_enabled: true
+contact_links:
+  - name: DSH plugin market catalog / DSH 插件目录
+    url: https://github.com/awesome-dsh-plugin/awesome-dsh-plugin
+    about: >
+      Listing this plugin in the DSH plugin market? See docs/marketplace-submission.md
+      in this repository — the catalog itself lives in that repo, not here.
