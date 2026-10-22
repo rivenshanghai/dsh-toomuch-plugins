@@ -72,7 +72,7 @@ class 名可能被构建工具 hash 或改名，而「直接子元素 `<nav>`」
 | --- | --- |
 | `src/index.js` | Host 半边。不需要任何 Host 能力，所以 `apply()` 是空的 |
 | `src/client.js` | Client 半边。全部逻辑在这里：`FooterToggle` 组件 + 折叠 / 展开 |
-| `cordis.patch.yml` | 往 profile 里插入一行插件加载记录（包名 `toomuch-plugins`，即仓库根） |
+| `cordis.patch.yml` | 往 profile 里插入一行插件加载记录（包名 `dsh-toomuch-plugins`，即仓库根） |
 | `locale/{en,zh}.json` | 插件列表里显示的标题和描述 |
 
 `package.json` 的 `exports` 把 Host 半边指向 `.`（`src/index.js`），Client 半边指向

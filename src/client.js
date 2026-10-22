@@ -1,5 +1,5 @@
 /**
- * Client half of the toomuch-plugins bundle (sidebar panel collapse).
+ * Client half of the dsh-toomuch-plugins bundle (sidebar panel collapse).
  *
  * The shipped sidebar stacks every global panel entry ("全局面板": plugins,
  * market, schedules, MCP studio, context, skill manager, system monitor, …)
@@ -16,7 +16,7 @@
  */
 window.__ModuleLoader__.load({
   // Must match the bundle's package name: the boot graph keys this module by it.
-  id: 'toomuch-plugins',
+  id: 'dsh-toomuch-plugins',
   factory(require) {
     const React = require('react')
     const h = React.createElement
@@ -147,7 +147,7 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots', 'locale'],
       apply(ctx) {
-        ctx.effect(() => ctx.locale.register(NS, { zh: ZH, en: EN }), 'toomuch-plugins: dictionaries')
+        ctx.effect(() => ctx.locale.register(NS, { zh: ZH, en: EN }), 'dsh-toomuch-plugins: dictionaries')
         ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
           name: 'sidebar.footer.action',
           id: 'sidebar-panel-collapse',

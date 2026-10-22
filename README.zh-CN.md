@@ -1,10 +1,11 @@
 <div align="center">
 
-# toomuch-plugins
+# dsh-toomuch-plugins
 
 **给 DSH Web 侧栏腾点地方。** · *Too many plugins, too little room.*
 
 [![license](https://img.shields.io/github/license/rivenshanghai/dsh-toomuch-plugins)](https://github.com/rivenshanghai/dsh-toomuch-plugins/blob/main/LICENSE)
+[![npm](https://img.shields.io/npm/v/dsh-toomuch-plugins)](https://www.npmjs.com/package/dsh-toomuch-plugins)
 [![node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen)](https://nodejs.org)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-blue)](https://github.com/rivenshanghai/dsh-toomuch-plugins)
 [![topic](https://img.shields.io/badge/topic-dsh--plugin-8A2BE2)](https://github.com/topics/dsh-plugin)
@@ -45,9 +46,12 @@ Studio、上下文、技能管理器、系统监控……七行大概 280px，�
 ## 安装
 
 本插件是「仓库根即包」的形式：根 `package.json` 里就声明了 `dsh.bundle` 清单，
-所以 DSH 可以直接从 GitHub 安装。
+所以 DSH 可以直接从 npm 或 GitHub 安装。
 
 ```sh
+# 从 npm 安装（预构建，不需要走构建授权）
+dsh plugin --profile web add dsh-toomuch-plugins
+
 # 从 GitHub 安装
 dsh plugin --profile web add github:rivenshanghai/dsh-toomuch-plugins
 
@@ -59,7 +63,7 @@ dsh plugin --profile web add /path/to/dsh-toomuch-plugins
 `dsh plugin` 实际是把参数转交给 profile 里的 `pnpm`。装完之后还要在 DSH 的插件设置里
 **启用它**（它会被写进 profile 的 `dsh.profile.bundles`），然后刷新页面。
 
-如果已经被收录进插件市场：在 DSH 里打开 **设置 → 插件市场**，搜索 `toomuch-plugins`。
+如果已经被收录进插件市场：在 DSH 里打开 **设置 → 插件市场**，搜索 `dsh-toomuch-plugins`。
 
 **验证方式：** 侧栏底部「设置」上面会多出一行「收起全局面板 / 展开全局面板」，
 同时那列全局面板入口消失。

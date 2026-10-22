@@ -1,10 +1,11 @@
 <div align="center">
 
-# toomuch-plugins
+# dsh-toomuch-plugins
 
 **Makes room in the DSH Web sidebar.** · *Too many plugins, too little room.*
 
 [![license](https://img.shields.io/github/license/rivenshanghai/dsh-toomuch-plugins)](https://github.com/rivenshanghai/dsh-toomuch-plugins/blob/main/LICENSE)
+[![npm](https://img.shields.io/npm/v/dsh-toomuch-plugins)](https://www.npmjs.com/package/dsh-toomuch-plugins)
 [![node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen)](https://nodejs.org)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-blue)](https://github.com/rivenshanghai/dsh-toomuch-plugins)
 [![topic](https://img.shields.io/badge/topic-dsh--plugin-8A2BE2)](https://github.com/topics/dsh-plugin)
@@ -50,9 +51,12 @@ entries**, and bring it back when you need it.
 ## Install
 
 The plugin is a repository-root package: it declares the `dsh.bundle` manifest, so
-DSH can install it straight from GitHub.
+DSH can install it straight from npm or GitHub.
 
 ```sh
+# from npm (prebuilt — no build approval step)
+dsh plugin --profile web add dsh-toomuch-plugins
+
 # from GitHub
 dsh plugin --profile web add github:rivenshanghai/dsh-toomuch-plugins
 
@@ -66,7 +70,7 @@ plugin** in DSH's plugin settings (it is written into the profile's
 `dsh.profile.bundles`), then refresh the page.
 
 From the plugin market, once listed: open **Settings → Plugin Market** in DSH and
-search for `toomuch-plugins`.
+search for `dsh-toomuch-plugins`.
 
 **Verify:** the sidebar footer gains a "Collapse global panels / Expand global
 panels" row above "settings", and the global panel column is gone.

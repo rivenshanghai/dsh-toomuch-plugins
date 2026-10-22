@@ -60,7 +60,7 @@ body:
       label: Steps to reproduce / 复现步骤
       description: 从打开 DSH 开始，一步一步写。
       placeholder: |
-        1. 安装并启用 toomuch-plugins
+        1. 安装并启用 dsh-toomuch-plugins
         2. 刷新页面
         3. 点侧栏底部的开关
     validations:
