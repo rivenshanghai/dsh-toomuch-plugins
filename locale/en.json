@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Sidebar Panel Collapse",
-    "description": "Collapses the global panel entries above the workspace in the left sidebar into one toggle at its foot, freeing room for the workspace."
+    "description": "Collapses the global panel entries above the workspace in the left sidebar into one toggle at its foot, freeing room for the workspace; adds sidebar display settings (grid mode, icons per row)."
   }
 }

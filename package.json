@@ -1,8 +1,8 @@
 {
   "name": "dsh-toomuch-plugins",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Collapses the global panel entries above the workspace in the DSH Web left sidebar into one toggle",
+  "description": "Collapses the global panel entries above the workspace in the DSH Web left sidebar into one toggle, with a grid-display settings page",
   "icon": "./icon.svg",
   "license": "MIT",
   "keywords": [

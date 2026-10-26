@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased / 未发布
 
+## 0.2.0 (2026-10-26)
+
+### Added / 新增
+
+- **Display settings page** — Settings → Built-in plugins gains a "Sidebar panel display" tab, registered through the `settings.plugins.tab` slot (same mechanism the built-in inventory tab uses). / **显示设置页** —— 设置 → 内置插件 新增「侧栏面板显示」页，走 `settings.plugins.tab` 槽注册（与内置「插件列表」同一机制）。
+- **Partial list while collapsed** — when the panels are collapsed the list can keep showing the first N entries (list mode, 0–5) or the first N rows (grid mode, 0–3, rows × icons); 0 keeps everything collapsed (the original behaviour). / **收起时保留部分入口** —— 收起后列表可保留前 N 个入口（列表模式 0–5）或前 N 行（网格模式 0–3，行 × 列）；0 为全部收起，与原行为一致。
+- **Grid display mode** — the global-panel entry list can show icons only, with each panel's name as a hover tooltip; icons per row configurable 2–4. Preferences live in `localStorage` (`dsh.sidebar-panel-collapse.display`); defaults keep the native look, corrupt or out-of-range values fall back safely. **Injected entries included** — bundles that insert their own sidebar buttons beside the panel list (following the `data-dsh-*-entry` convention, e.g. 今日值得读 / 全局搜索 / 容器) are adopted into the grid while it is on and put back in place when it is off. / **网格显示模式** —— 全局面板入口只显示图标，面板名进悬停提示；每行图标数 2–4 可调。偏好存 `localStorage`（`dsh.sidebar-panel-collapse.display`），默认保持原生外观，脏值 / 越界值安全回退。**注入式入口一并纳入** —— 那些绕过面板槽、自己往侧栏插按钮的插件（沿用 `data-dsh-*-entry` 约定，如今日值得读 / 全局搜索 / 容器）开启网格时被收养进网格，关闭时还原原位。
+- Zero-dependency smoke check `test/smoke.js` (`node test/smoke.js`). / 零依赖冒烟检查 `test/smoke.js`。
+
 ## 0.1.1 (2026-10-22)
 
 ### Changed / 变更
@@ -24,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sidebar panel collapse** — collapses the global-panel entry list above the workspace in the DSH Web left sidebar into a single toggle in the sidebar footer. The choice is remembered in `localStorage` and survives reloads. / **侧栏面板收起** —— 把 DSH Web 左栏工作区上方的全局面板入口收起成侧栏底部的一个开关，选择记在 `localStorage` 里，刷新后保持。
 - Works in the narrow 56px rail, where the toggle collapses into a round icon button. / 窄栏（56px rail）下自动变成圆钮。
 
-[Unreleased]: https://github.com/rivenshanghai/dsh-toomuch-plugins/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/rivenshanghai/dsh-toomuch-plugins/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/rivenshanghai/dsh-toomuch-plugins/releases/tag/v0.2.0
 [0.1.1]: https://github.com/rivenshanghai/dsh-toomuch-plugins/releases/tag/v0.1.1
 [0.1.0]: https://github.com/rivenshanghai/dsh-toomuch-plugins/releases/tag/v0.1.0
