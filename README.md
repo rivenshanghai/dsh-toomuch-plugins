@@ -58,6 +58,17 @@ entries**, and bring it back when you need it.
 - **Off by default** — grid mode is opt-in; the preference lives in `localStorage`
   alongside the collapse state and survives reloads.
 
+## Screenshots
+
+Grid display — icons only, panel names as hover tooltips, 2–4 icons per row:
+
+![Sidebar panel list in grid display mode](docs/grid-dsh-toomuch-plugins.png)
+
+The "Sidebar panel display" settings page (Settings → Built-in plugins) — grid
+mode, icons per row, and how many rows stay visible while collapsed:
+
+![Sidebar panel display settings page](docs/grid-setup-dsh-toomuch-plugins.png)
+
 ## Install
 
 The plugin is a repository-root package: it declares the `dsh.bundle` manifest, so
