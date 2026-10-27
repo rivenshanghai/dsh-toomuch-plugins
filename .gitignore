@@ -14,3 +14,7 @@ node_modules/
 # personal notes, not published
 docs/github-pre-submit-checklist.md
 docs/marketplace-submission.md
+
+# local release/publish playbooks, not published
+docs/github-release-playbook.md
+docs/npm-publish-playbook.md
