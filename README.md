@@ -55,6 +55,14 @@ entries**, and bring it back when you need it.
 - **Keep some entries while collapsed** — list mode keeps the first 0–5 entries
   visible while the panels are collapsed; grid mode keeps the first 0–3 rows
   (rows × icons). Default 0, i.e. everything collapsed.
+- **Plugin display order** — pick panels one by one from a dropdown on the
+  settings page; the list order is the sidebar order (lossless CSS `order`
+  overrides). Capped at 20, duplicates dropped on save.
+- **Click counting** — panel clicks accumulate into
+  `~/.dsh/plugins/dsh-toomuch-plugins/click-counts.json`, (silently skipped when the remote is unavailable).
+- **Icon size** — pick small (12px), medium (the sidebar's own size, the
+  default) or large (24px); the list and grid icons scale right away and the
+  choice survives reloads.
 - **Off by default** — grid mode is opt-in; the preference lives in `localStorage`
   alongside the collapse state and survives reloads.
 
@@ -96,8 +104,9 @@ search for `dsh-toomuch-plugins`.
 **Verify:** the sidebar footer gains a "Collapse global panels / Expand global
 panels" row above "settings", and the global panel column is gone. Settings →
 Built-in plugins gains a "Sidebar panel display" page for grid mode,
-icons-per-row, and how many entries (list) or rows (grid) stay visible while
-collapsed.
+icons-per-row, how many entries (list) or rows (grid) stay visible while
+collapsed, the custom plugin display order (up to 20 entries), and the icon
+size (small / medium / large).
 
 Requirements: DSH (DeepSeek Harness) with a `web` profile; Node.js ≥ 20.
 
@@ -111,11 +120,22 @@ Requirements: DSH (DeepSeek Harness) with a `web` profile; Node.js ≥ 20.
    the global panel list — and toggles its `display`;
 3. remembers the choice in `localStorage`;
 4. registers a settings page through the `settings.plugins.tab` slot (Settings →
-   Built-in plugins) where grid mode and the 2–4 icons-per-row choice live;
+   Built-in plugins) where grid mode, the 2–4 icons-per-row choice and the
+   three icon sizes (small / medium / large) live;
 5. applies grid mode to the same `<nav>`: a marker class plus a columns CSS
    variable, the label span hidden, and each entry's `aria-label` mirrored into
    the native `title` as the hover tooltip (DSH's own tooltip is disabled in the
-   wide sidebar, and the label is not rendered there either).
+   wide sidebar, and the label is not rendered there either);
+6. applies the custom display order as CSS `order` overrides on the `<nav>`'s
+   direct children (lossless — React's DOM reconciliation is never fought), and
+   makes the collapsed limit keep the first N entries *visually*;
+7. mounts a hand-rolled Typert remote contribution (the dsh-cost-meter pattern)
+   and reports panel clicks to the host half, which accumulates them into
+   `click-counts.json` .
+
+The host half (`src/index.js`) only provides that one `spcClicks` service:
+a prototype method plus a written-out `typertRemote` binding, picked up by the
+gateway's src-descriptor fallback — no generated manifest, no DSH internals.
 
 The basis is DSH's own `@deepseek-ai/dsh-client-ui-sidebar`: `nav.panelList` is a
 direct child of the sidebar root, so walking up from the footer button always
@@ -132,8 +152,8 @@ contract is written down in [docs/design.md](docs/design.md).
 ├── package.json            plugin manifest: dsh.bundle.patch + dsh.client
 ├── cordis.patch.yml        inserts the loader row into the profile
 ├── src/
-│   ├── index.js            Host half (no host capabilities needed; apply is empty)
-│   └── client.js           Client half: footer toggle + collapse/expand + grid display settings
+│   ├── index.js            Host half: spcClicks remote service → click-counts.json
+│   └── client.js           Client half: footer toggle + collapse/expand + grid + display order + click reporting
 ├── test/smoke.js           zero-dependency smoke check (node test/smoke.js)
 ├── locale/{en,zh}.json     title and description in the plugin list
 ├── docs/                   design notes, market submission, pre-submit checklist

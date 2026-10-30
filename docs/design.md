@@ -13,7 +13,8 @@ DSH Web 左侧栏从上到下是：品牌行 → 新会话 → **全局面板入
 
 1. **在需要时把这列收起来，把空间还给工作区**（0.1 起）。
 2. **给这列一个可配置的显示方式**（0.2 起）：网格模式 —— 只显示图标、文字放进悬停提示；
-   每行图标数量 2–4 可调；收起时可保留前 N 个入口（列表模式按个数，网格模式按行数）。
+   每行图标数量 2–4 可调；收起时可保留前 N 个入口（列表模式按个数，网格模式按行数）；
+   图标尺寸三档（小 / 中 / 大，中为默认）。
    配置页在 设置 → 内置插件 里。
 
 ## 2. 范围
@@ -28,14 +29,23 @@ DSH Web 左侧栏从上到下是：品牌行 → 新会话 → **全局面板入
 - **收起时保留部分入口**：列表模式保留前 0–5 个，网格模式保留前 0–3 行
   （行数 × 列数即图标数）；0 = 全部收起，即 0.1 的原始行为。
 - **配置页**：通过 `settings.plugins.tab` 槽注册到 设置 → 内置插件。
+- **插件显示顺序**：配置页里逐个从下拉框挑选面板，列表顺序即显示顺序；上限 20 项，
+  重复项保存时自动去掉。用 CSS `order` 重排（不动 React DOM 调和）。
+- **图标尺寸**：小（12px）/ 中（默认 = 侧栏原生 16px）/ 大（24px）三档。给 `<nav>`
+  打标记类、CSS 覆盖行内 svg 的 `width`/`height`（sprite symbol 带 viewBox，
+  随视口缩放；`!important` 是因为第三方入口可能用行内样式定尺寸）。
+- **点击计数**：面板入口被点击时，客户端把 id 报给自己的 Host 半边
+  （手写 Typert 远程调用 `spcClicks.recordClick`），落盘到
+  `~/.dsh/plugins/dsh-toomuch-plugins/click-counts.json`。
 
 不做（有意为之）：
 
 - **不碰品牌行、新会话、设置**。在 Linux / Windows 上，品牌行里的「收起侧栏」按钮是
   唯一的收起入口，把它一起藏掉等于少一个功能。
 - **不隐藏任何面板本身**，只是不显示入口；面板内容从别处照常能打开。
-- **不改动 Host 侧行为**，不注入任何 DSH 内部模块，**不读写 DSH 配置**
-  （不用 `ctx.configForms` 那套 Host 设置传输）；自己的偏好仍只写 localStorage。
+- **不注入任何 DSH 内部模块、不读写 DSH 配置**（不用 `ctx.configForms` 那套 Host 设置
+  传输），不改动别的插件 / 宿主的行为。自己的偏好仍只写 localStorage；唯一的落盘
+  是自己 Host 半边的私有计数文件（`click-counts.json`），不碰其他任何文件。
 
 ## 3. 依赖的 DOM 约定
 
@@ -64,7 +74,7 @@ class 名可能被构建工具 hash 或改名，而「直接子元素 `<nav>`」
 | key | 内容 | 默认 / 读取规则 |
 | --- | --- | --- |
 | `dsh.sidebar-panel-collapse` | 折叠状态 | 只有明确存了 `'expanded'` 才算展开，其余按收起 |
-| `dsh.sidebar-panel-collapse.display` | 显示偏好 `{grid, columns, collapsedCount, collapsedRows}` | JSON 对象；`grid` 必须是 `true` 才开；`columns` 取整且必须在 2–4，否则回 3；`collapsedCount` 取整且必须在 0–5，否则回 0；`collapsedRows` 取整且必须在 0–3，否则回 0；整条读取 / 解析失败回默认对象 |
+| `dsh.sidebar-panel-collapse.display` | 显示偏好 `{grid, columns, collapsedCount, collapsedRows, order, iconSize}` | JSON 对象；`grid` 必须是 `true` 才开；`columns` 取整且必须在 2–4，否则回 3；`collapsedCount` 取整且必须在 0–5，否则回 0；`collapsedRows` 取整且必须在 0–3，否则回 0；`order` 必须是数组，元素只保留非空字符串、去重、最多 20 个，否则回 `[]`；`iconSize` 只认 `'sm'`/`'lg'`，其余（含缺省）回 `'md'`；整条读取 / 解析失败回默认对象 |
 
 - 折叠默认 **收起**（首次安装即刻生效，这是这个插件存在的意义）。
 - 显示偏好默认**关闭网格、每行 3 个、收起时保留 0 个（全部收起）**，即不改变原生外观与 0.1 行为。
@@ -120,8 +130,8 @@ class 名可能被构建工具 hash 或改名，而「直接子元素 `<nav>`」
 
 | 文件 | 角色 |
 | --- | --- |
-| `src/index.js` | Host 半边。不需要任何 Host 能力，所以 `apply()` 是空的 |
-| `src/client.js` | Client 半边。全部逻辑在这里：`FooterToggle`（折叠 + 网格套用）、`DisplaySettingsTab`（设置页）、localStorage 读写与偏好广播 |
+| `src/index.js` | Host 半边。提供 `spcClicks` Typert 远程服务（手写 `typertRemote` 绑定 + 原型方法标记，走 gateway 的 src 描述符兜底），把客户端报来的面板点击累加进 `click-counts.json` |
+| `src/client.js` | Client 半边。全部逻辑在这里：`FooterToggle`（折叠 + 网格 + 顺序套用）、`DisplaySettingsTab`（设置页）、localStorage 读写与偏好广播、点击采集与 `$mount` 远程贡献 |
 | `test/smoke.js` | 零依赖冒烟检查：`node test/smoke.js`。桩掉 `window.__ModuleLoader__` / react，断言两个槽注册的元数据 + 设置页读写偏好的默认值规则。不进 npm 包 |
 | `cordis.patch.yml` | 往 profile 里插入一行插件加载记录（包名 `dsh-toomuch-plugins`，即仓库根） |
 | `locale/{en,zh}.json` | 插件列表里显示的标题和描述 |
@@ -157,10 +167,20 @@ class 名可能被构建工具 hash 或改名，而「直接子元素 `<nav>`」
 15. 收起限额设回 0 后收起：整个列表隐藏（与 0.1 行为一致）。
 16. 收起限额刷新页面后保持。
 17. `node test/smoke.js` 通过。
+18. 设置页「插件显示顺序」：下拉框列出全部面板；选中即追加到列表，重复选中保存后
+    自动只剩一条；加满 20 项后下拉框禁用；上移 / 下移 / 移除立刻生效并保持。
+19. 设置顺序后侧栏入口立刻按该顺序显示（未列出的排在后面）；清空后恢复原生顺序。
+20. 收起限额按**视觉顺序**计数（设了顺序后，收起时保留的是顺序里的前 N 个）。
+21. 点一个面板入口后，`~/.dsh/plugins/dsh-toomuch-plugins/click-counts.json`
+    出现 / 累加该面板的计数；控制台无报错（远程不可用时静默不计数）。
+22. 设置页「图标尺寸」：默认「中」按下；选「小」/「大」后侧栏入口图标立刻缩到
+    12px / 放大到 24px（列表与网格模式都生效），刷新后保持；选回「中」恢复原生尺寸。
+23. 图标尺寸脏值（如 `"xl"`）读回时回「中」。
 
 ## 9. 后续可能的扩展（都没做）
 
 - 支持「折叠时仍显示某一个常用面板」（0.2.0 起已有收起保留 N 个/行；单个面板级的挑选还没做）。
+- 按 `click-counts.json` 的计数**智能自动排序**（当前只记录，未消费）。
 - 支持把多个插件的侧栏行一起折叠（那更适合 `dsh-sidebar-quiet` 这类插件去做）。
 - 记住每个窗口的展开状态而不是全局一个状态。
 - 网格模式的悬停提示改用 DSH 的 Tooltip 原语（带主题样式），而不是原生 `title`；

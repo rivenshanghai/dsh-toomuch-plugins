@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased / 未发布
 
+### Added / 新增
+
+- **Plugin display order** — the display settings page gains a 「插件显示顺序」 section: pick panels one by one from a dropdown; the list order is the sidebar display order (applied as lossless CSS `order` overrides). Capped at 20 entries; duplicates are dropped on save; per-row move up / move down / remove controls. The collapsed limit keeps the first N entries *visually*. / **插件显示顺序** —— 显示设置页新增「插件显示顺序」：从下拉框逐个挑选面板，列表顺序即侧栏显示顺序（以无损 CSS `order` 重排）。上限 20 项，重复项保存时自动去掉；每行带上移 / 下移 / 移除。收起限额按视觉顺序保留前 N 个。
+- **Click counting** — clicking a panel entry reports its id to the plugin's host half over a hand-rolled Typert remote (`spcClicks.recordClick`, cost-meter style), which accumulates counts into `~/.dsh/plugins/dsh-toomuch-plugins/click-counts.json` . Best effort: if the remote is unavailable the sidebar keeps working without counts. / **点击计数** —— 点击面板入口会把手写 Typert 远程调用（`spcClicks.recordClick`，cost-meter 同款接线）报给本插件 Host 半边，累加写入 `~/.dsh/plugins/dsh-toomuch-plugins/click-counts.json`。尽力而为：远程不可用时侧栏照常工作、只是不计数。
+- **Icon size picker** — the display settings page gains an 「图标尺寸」 row with three choices: small (12px), medium (the sidebar's own size, default) and large (24px). Applied as a marker class on the panel-list nav; the stylesheet scales the row glyphs, in list and grid mode alike, and an unknown stored value falls back to medium. / **图标尺寸** —— 显示设置页新增「图标尺寸」行，三档：小（12px）/ 中（侧栏原生尺寸，默认）/ 大（24px）。以 nav 标记类套用，样式表缩放行内图标，列表与网格模式都生效；脏值读回回「中」。
+
 ## 0.2.0 (2026-10-26)
 
 ### Added / 新增

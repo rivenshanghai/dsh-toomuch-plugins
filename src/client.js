@@ -13,9 +13,14 @@
  *
  * It also ships a display settings page (Settings → Built-in plugins, via the
  * `settings.plugins.tab` slot): turn on grid display so the panel list shows
- * icons only with the label as a hover tooltip, and pick how many icons fit
- * per row (2–4). Those preferences live in localStorage too — same safe-
- * default rules as the collapse state. Details: docs/design.md.
+ * icons only with the label as a hover tooltip, pick how many icons fit per
+ * row (2–4), pick one of three icon sizes (small / medium / large), and set a
+ * custom plugin display order (up to 20 entries, added one by one from a
+ * dropdown; duplicates are dropped on save). Panel clicks
+ * are additionally reported to the host half over a hand-rolled Typert
+ * remote, which appends them to `click-counts.json` for a future auto-sort.
+ * Preferences live in localStorage too — same safe-default rules as the
+ * collapse state. Details: docs/design.md.
  *
  * Styling uses only `--dsw-alias-*` theme tokens and the stylesheet rides
  * inside the component, so unmounting removes it.
@@ -38,6 +43,9 @@ window.__ModuleLoader__.load({
     /** Marker class and custom property grid mode sets on the panel-list nav. */
     const GRID_CLASS = 'dsh-spc-grid'
     const GRID_COLS_VAR = '--dsh-spc-grid-cols'
+    /** Icon-size marker classes (default keeps the sidebar's own size). */
+    const SIZE_SM_CLASS = 'dsh-spc-size-sm'
+    const SIZE_LG_CLASS = 'dsh-spc-size-lg'
 
     const ZH = {
       collapse: '收起全局面板',
@@ -48,6 +56,18 @@ window.__ModuleLoader__.load({
       collapsedCount: '收起时显示插件数',
       collapsedRows: '收起时显示行数',
       collapsedHint: '0 = 全部收起',
+      iconSize: '图标尺寸',
+      sizeSm: '小',
+      sizeMid: '中',
+      sizeLg: '大',
+      sizeHint: '中为默认',
+      orderTitle: '插件显示顺序',
+      orderPick: '选择要添加的插件…',
+      orderHint: '最多 20 项；重复项保存时自动去掉',
+      orderEmpty: '尚未设置，按默认顺序显示',
+      orderUp: '上移',
+      orderDown: '下移',
+      orderRemove: '移除',
     }
     const EN = {
       collapse: 'Collapse global panels',
@@ -58,6 +78,18 @@ window.__ModuleLoader__.load({
       collapsedCount: 'Entries shown while collapsed',
       collapsedRows: 'Rows shown while collapsed',
       collapsedHint: '0 = fully collapsed',
+      iconSize: 'Icon size',
+      sizeSm: 'Small',
+      sizeMid: 'Medium',
+      sizeLg: 'Large',
+      sizeHint: 'Medium is the default',
+      orderTitle: 'Plugin display order',
+      orderPick: 'Pick a plugin to add…',
+      orderHint: 'Up to 20 entries; duplicates are dropped on save',
+      orderEmpty: 'Not set — shown in default order',
+      orderUp: 'Move up',
+      orderDown: 'Move down',
+      orderRemove: 'Remove',
     }
 
     const CSS = `
@@ -74,6 +106,11 @@ nav.dsh-spc-grid :is(button,[role=button],[data-spc-adopted]){box-sizing:border-
 nav.dsh-spc-grid :is(button,[role=button],[data-spc-adopted])>*:not(:first-child){display:none;}
 nav.dsh-spc-grid>div{min-width:0;}
 nav [data-spc-hidden]{display:none;}
+/* Icon size: the row glyphs take width/height as SVG attributes (or inline
+   style in third-party entries), so override with !important; the sprite
+   symbols carry a viewBox, so the drawing scales with the viewport. */
+nav.dsh-spc-size-sm :is(button,[role=button],[data-spc-adopted]) svg{width:12px !important;height:12px !important;}
+nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px !important;height:24px !important;}
 `
 
     /** Stylesheet of the settings page (Settings → Built-in plugins tab). */
@@ -88,17 +125,37 @@ nav [data-spc-hidden]{display:none;}
 .dsh-spc-col:hover{background:var(--dsw-alias-interactive-bg-hover);}
 .dsh-spc-col.dsh-spc-colOn{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-state-business-primary);}
 .dsh-spc-col:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px;}
+.dsh-spc-col:disabled{cursor:default;opacity:.45;}
+.dsh-spc-select{cursor:pointer;flex:1;min-width:0;height:28px;color:var(--dsw-alias-label-primary);background:0 0;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-sm);padding:0 6px;font:inherit;}
+.dsh-spc-select:disabled{cursor:default;opacity:.5;}
 `
 
     /**
      * Display settings: grid on/off plus icons per row (2–4). While the
      * panels are collapsed, the list keeps showing the first `collapsedCount`
      * entries (list mode) or the first `collapsedRows` rows (grid mode);
-     * 0 collapses everything, the historical behaviour.
+     * 0 collapses everything, the historical behaviour. `iconSize` scales
+     * the row glyphs: sm/lg mark the nav, md leaves the sidebar's own size.
      */
-    const DEFAULT_PREFS = { grid: false, columns: 3, collapsedCount: 0, collapsedRows: 0 }
+    const DEFAULT_PREFS = { grid: false, columns: 3, collapsedCount: 0, collapsedRows: 0, order: [], iconSize: 'md' }
     const COLLAPSED_COUNT_MAX = 5
     const COLLAPSED_ROWS_MAX = 3
+    /** Custom display order: at most 20 panel ids, duplicates dropped on save. */
+    const ORDER_MAX = 20
+
+    /** Coerce anything to a clean order list: strings only, deduped, ≤ 20. */
+    function sanitizeOrder(value) {
+      if (!Array.isArray(value)) return []
+      const seen = new Set()
+      const out = []
+      for (const id of value) {
+        if (typeof id !== 'string' || id === '' || seen.has(id)) continue
+        seen.add(id)
+        out.push(id)
+        if (out.length >= ORDER_MAX) break
+      }
+      return out
+    }
 
     /** Cross-component sync: the settings page writes, the toggle re-applies. */
     const prefsListeners = new Set()
@@ -145,6 +202,8 @@ nav [data-spc-hidden]{display:none;}
             collapsedRows >= 0 && collapsedRows <= COLLAPSED_ROWS_MAX
               ? collapsedRows
               : DEFAULT_PREFS.collapsedRows,
+          order: sanitizeOrder(parsed.order),
+          iconSize: parsed.iconSize === 'sm' || parsed.iconSize === 'lg' ? parsed.iconSize : 'md',
         }
       } catch {
         return DEFAULT_PREFS
@@ -153,7 +212,8 @@ nav [data-spc-hidden]{display:none;}
 
     function writePrefs(prefs) {
       try {
-        window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
+        // Duplicates are dropped here: every save writes a clean list.
+        window.localStorage.setItem(PREFS_KEY, JSON.stringify({ ...prefs, order: sanitizeOrder(prefs.order) }))
       } catch {
         // Storage unavailable (private mode): the choice just does not persist.
       }
@@ -174,10 +234,88 @@ nav [data-spc-hidden]{display:none;}
       return null
     }
 
+    /**
+     * Live list of slot panels ({id, label}) for mapping DOM rows back to
+     * panel ids. Refreshed by apply() (which owns the slots context) before
+     * every use; empty until the plugin has applied.
+     */
+    let listEntries = () => []
+    function refreshListEntries(ctx) {
+      listEntries = () => {
+        try {
+          return ctx.slots.entriesOfSlot('sidebar.panellist').map((entry) => {
+            const id = entry.options && entry.options.id
+            if (typeof id !== 'string' || id === '') return null
+            const raw = entry.options.label
+            const label = typeof raw === 'function' ? raw() : raw
+            return { id, label: typeof label === 'string' && label !== '' ? label : id }
+          }).filter((entry) => entry !== null)
+        } catch {
+          return []
+        }
+      }
+    }
+
+    /** Row → panel id: adopted third-party entries first, then aria-label. */
+    function entryIdOfRow(target) {
+      if (target === null || typeof target.closest !== 'function') return null
+      const adopted = target.closest(ADOPT_ATTRS.map((attr) => `[${attr}]`).join(','))
+      if (adopted !== null) {
+        const attr = ADOPT_ATTRS.find((name) => adopted.hasAttribute(name))
+        return attr === undefined ? null : attr.replace(/^data-dsh-/, '').replace(/-entry$/, '')
+      }
+      const row = target.closest('button,[role=button]')
+      if (row === null || row.closest('nav') === null) return null
+      const label = row.getAttribute('aria-label')
+      if (label === null) return null
+      const entry = listEntries().find((item) => item.label === label)
+      return entry === undefined ? null : entry.id
+    }
+
+    /**
+     * Custom display order without touching React: the panel list is a flex
+     * (or grid) container, so each direct child just gets a CSS `order` value.
+     * Listed panels take their position, everything else sorts after them in
+     * natural DOM order. An empty list clears the overrides entirely.
+     */
+    function applyOrder(nav, prefs) {
+      const order = sanitizeOrder(prefs.order)
+      if (order.length === 0) {
+        for (const child of nav.children) child.style.removeProperty('order')
+        return
+      }
+      const entries = listEntries()
+      for (const child of nav.children) {
+        const row = child.matches('button,[role=button]')
+          ? child
+          : typeof child.querySelector === 'function'
+            ? child.querySelector('button,[role=button]')
+            : null
+        const label = row === null ? null : row.getAttribute('aria-label')
+        const entry = label === null ? null : entries.find((item) => item.label === label)
+        const index = entry === null || entry === undefined ? -1 : order.indexOf(entry.id)
+        child.style.setProperty('order', String(index === -1 ? order.length + 1 : index + 1))
+      }
+    }
+
+    /** Visual rank of a row: order value of its direct child of the nav. */
+    function rowRank(nav, row) {
+      let el = row
+      while (el.parentElement !== null && el.parentElement !== nav) el = el.parentElement
+      if (el.parentElement !== nav) return 0
+      const value = Number(el.style.order)
+      return Number.isFinite(value) ? value : 0
+    }
+
     function applyNav(rootEl, wide, collapsed, prefs) {
       if (rootEl === null) return
       const nav = findPanelNav(rootEl)
       if (nav === null) return
+      // Icon size: only sm/lg need a marker; md means "leave the sidebar's
+      // own icon size alone". Re-applied on every render like the rest.
+      nav.classList.toggle(SIZE_SM_CLASS, prefs.iconSize === 'sm')
+      nav.classList.toggle(SIZE_LG_CLASS, prefs.iconSize === 'lg')
+      applyOrder(nav, prefs)
       // How many entries the collapsed list keeps: rows × columns in grid
       // mode, plain entries otherwise; 0 hides the whole list (the original
       // behaviour). Expanding always shows everything again.
@@ -187,9 +325,12 @@ nav [data-spc-hidden]{display:none;}
           ? prefs.collapsedRows * prefs.columns
           : prefs.collapsedCount
       nav.style.display = limit === 0 ? 'none' : ''
-      let index = 0
-      for (const row of nav.querySelectorAll('button,[role=button],[data-spc-adopted]')) {
-        if (index++ < limit) row.removeAttribute('data-spc-hidden')
+      // Hide by visual order (custom display order first), not DOM order.
+      const rows = Array.from(nav.querySelectorAll('button,[role=button],[data-spc-adopted]'))
+        .map((row, domIndex) => ({ row, domIndex, rank: rowRank(nav, row) }))
+        .sort((a, b) => a.rank - b.rank || a.domIndex - b.domIndex)
+      for (const [index, { row }] of rows.entries()) {
+        if (index < limit) row.removeAttribute('data-spc-hidden')
         else row.setAttribute('data-spc-hidden', '')
       }
     }
@@ -348,11 +489,87 @@ nav [data-spc-hidden]{display:none;}
       )
     }
 
+    /**
+     * Client → host click reporting, hand-rolled Typert style (the
+     * dsh-cost-meter pattern): a strict-codec contribution the client mounts
+     * on `ctx.remote`, answered by the host half's `spcClicks.recordClick`.
+     * The host side uses the gateway's src-descriptor fallback, so no
+     * generated zod manifest is needed anywhere.
+     */
+    const CLICK_CONTRIBUTION = {
+      package: 'dsh-toomuch-plugins',
+      face: 'host',
+      descriptors: [
+        {
+          id: 'dsh-toomuch-plugins#spcClicks/recordClick',
+          service: 'spcClicks',
+          namespace: 'spcClicks',
+          method: 'recordClick',
+          invocation: { kind: 'direct' },
+          parameters: [
+            {
+              name: 'id',
+              wire: 'id',
+              source: 'json',
+              codec: { mode: 'strict', typeSymbol: 'dsh-toomuch-plugins#PanelId', schema: { parse: (v) => v }, create: () => ({ parse: (v) => v }) },
+            },
+          ],
+          result: { mode: 'strict', typeSymbol: 'dsh-toomuch-plugins#ClickCount', schema: { parse: (v) => v }, create: () => ({ parse: (v) => v }) },
+        },
+      ],
+    }
+
     return {
-      inject: ['slots', 'locale'],
+      inject: ['slots', 'locale', 'remote'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { zh: ZH, en: EN }), 'dsh-toomuch-plugins: dictionaries')
         const t = ctx.locale.bind(NS)
+        refreshListEntries(ctx)
+
+        // Report panel clicks to the host half (best effort: if the remote
+        // is unavailable the sidebar just keeps working without counts).
+        let clickRpc = null
+        ctx.effect(() => {
+          if (ctx.remote === undefined || typeof ctx.remote.$mount !== 'function') return undefined
+          let cancelled = false
+          let dispose = null
+          ctx.remote.$mount(CLICK_CONTRIBUTION)
+            .then((d) => {
+              if (cancelled) {
+                d()
+                return
+              }
+              dispose = d
+              clickRpc = ctx.get('remote.spcClicks')
+            })
+            .catch(() => {
+              // Mount failed: counts stay off, nothing else to clean up.
+            })
+          return () => {
+            cancelled = true
+            clickRpc = null
+            if (dispose !== null) {
+              try {
+                dispose()
+              } catch {
+                // Already gone.
+              }
+            }
+          }
+        }, 'dsh-toomuch-plugins: click remote')
+
+        ctx.effect(() => {
+          if (typeof document === 'undefined') return undefined
+          const onClick = (event) => {
+            if (clickRpc === null) return
+            const id = entryIdOfRow(event.target)
+            if (id === null) return
+            // Fire and forget; the host clamps and persists the count.
+            Promise.resolve(clickRpc.recordClick(id)).catch(() => {})
+          }
+          document.addEventListener('click', onClick)
+          return () => document.removeEventListener('click', onClick)
+        }, 'dsh-toomuch-plugins: click count')
 
         /**
          * The display settings page, mounted as this plugin's tab in the
@@ -366,7 +583,7 @@ nav [data-spc-hidden]{display:none;}
           // A labelled row of single-choice buttons for one pref. The
           // collapsed-limit picker switches with the display mode: plain
           // entries in list mode, rows (× columns) in grid mode.
-          const pickRow = (prefKey, labelKey, options, hintKey) =>
+          const pickRow = (prefKey, labelKey, options, hintKey, labelOf) =>
             h(
               'div',
               { className: 'dsh-spc-setRow' },
@@ -384,7 +601,7 @@ nav [data-spc-hidden]{display:none;}
                       'aria-pressed': prefs[prefKey] === n,
                       onClick: () => update({ [prefKey]: n }),
                     },
-                    String(n),
+                    labelOf === undefined ? String(n) : labelOf(n),
                   ),
                 ),
               ),
@@ -410,6 +627,110 @@ nav [data-spc-hidden]{display:none;}
             prefs.grid
               ? pickRow('collapsedRows', 'collapsedRows', [0, 1, 2, 3], 'collapsedHint')
               : null,
+            // ---- Icon size ------------------------------------------------
+            // Small / medium (the sidebar's own size, the default) / large.
+            // The buttons show localized captions, everything else the shared
+            // single-choice row already does.
+            pickRow('iconSize', 'iconSize', ['sm', 'md', 'lg'], 'sizeHint', (n) =>
+              t(n === 'sm' ? 'sizeSm' : n === 'md' ? 'sizeMid' : 'sizeLg'),
+            ),
+            // ---- Plugin display order ------------------------------------
+            // Pick panels one by one from the dropdown; the list order *is*
+            // the display order. Adding an already-listed panel is allowed —
+            // writePrefs dedupes on save — and the list caps at 20.
+            (() => {
+              const entries = listEntries()
+              const order = prefs.order
+              const labelOf = (id) => {
+                const hit = entries.find((entry) => entry.id === id)
+                return hit === undefined ? id : hit.label
+              }
+              const full = order.length >= ORDER_MAX
+              const add = (value) => {
+                if (value === '' || full) return
+                update({ order: [...order, value] })
+              }
+              const move = (index, delta) => {
+                const next = [...order]
+                const other = index + delta
+                if (other < 0 || other >= next.length) return
+                ;[next[index], next[other]] = [next[other], next[index]]
+                update({ order: next })
+              }
+              const remove = (index) => update({ order: order.filter((_, i) => i !== index) })
+              return [
+                h(
+                  'div',
+                  { className: 'dsh-spc-setRow', key: 'order' },
+                  h('span', { className: 'dsh-spc-setCaption' }, t('orderTitle')),
+                  h(
+                    'select',
+                    {
+                      className: 'dsh-spc-select',
+                      value: '',
+                      disabled: full || entries.length === 0,
+                      onChange: (event) => add(event.target.value),
+                    },
+                    h('option', { value: '' }, t('orderPick')),
+                    entries.map((entry) => h('option', { key: entry.id, value: entry.id }, entry.label)),
+                  ),
+                ),
+                h(
+                  'div',
+                  { className: 'dsh-spc-setRow', key: 'order-hint' },
+                  h('span', { className: 'dsh-spc-setCaption' }, t('orderHint')),
+                ),
+                order.length === 0
+                  ? h(
+                      'div',
+                      { className: 'dsh-spc-setRow', key: 'order-empty' },
+                      h('span', { className: 'dsh-spc-setCaption' }, t('orderEmpty')),
+                    )
+                  : order.map((id, index) =>
+                      h(
+                        'div',
+                        { className: 'dsh-spc-setRow', key: `order-${id}` },
+                        h('span', { className: 'dsh-spc-setCaption' }, `${index + 1}. ${labelOf(id)}`),
+                        h(
+                          'div',
+                          { className: 'dsh-spc-cols' },
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'dsh-spc-col',
+                              'aria-label': t('orderUp'),
+                              disabled: index === 0,
+                              onClick: () => move(index, -1),
+                            },
+                            '▲',
+                          ),
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'dsh-spc-col',
+                              'aria-label': t('orderDown'),
+                              disabled: index === order.length - 1,
+                              onClick: () => move(index, 1),
+                            },
+                            '▼',
+                          ),
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'dsh-spc-col',
+                              'aria-label': t('orderRemove'),
+                              onClick: () => remove(index),
+                            },
+                            '✕',
+                          ),
+                        ),
+                      ),
+                    ),
+              ]
+            })(),
           )
         }
 

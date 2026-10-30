@@ -44,6 +44,10 @@ Studio、上下文、技能管理器、系统监控……七行大概 280px，�
 - **窄栏友好** —— 侧栏收成 56px rail 时，开关变成一个圆形图标按钮。
 - **网格显示** —— 设置 → 内置插件 里开启：入口只显示图标，面板名变成悬停提示；每行 2–4 个图标可调。绕过面板槽、自己往侧栏插按钮的插件（沿用 `data-dsh-*-entry` 约定，如今日值得读 / 全局搜索 / 容器）也会一并纳入网格，关闭时还原原位。
 - **收起时保留部分入口** —— 列表模式可设收起后仍显示前 0–5 个入口；网格模式可设仍显示前 0–3 行（行数 × 列数）。默认 0，即全部收起。
+- **插件显示顺序** —— 设置页里从下拉框逐个挑选面板，列表顺序即侧栏显示顺序（以无损 CSS `order` 重排）；最多 20 项，重复项保存时自动去掉。
+- **点击计数** —— 点击面板入口会把计数累加进 `~/.dsh/plugins/dsh-toomuch-plugins/click-counts.json`，（远程不可用时静默跳过）。
+- **图标尺寸** —— 设置页可选 小（12px）/ 中（默认，侧栏原生尺寸）/ 大（24px）三档，
+  列表与网格模式下的入口图标立刻缩放，刷新后保持。
 - **默认不折腾** —— 网格默认关闭，偏好和折叠状态一样存 `localStorage`，刷新、重启都保持。
 
 ## 效果预览
@@ -80,7 +84,8 @@ dsh plugin --profile web add /path/to/dsh-toomuch-plugins
 
 **验证方式：** 侧栏底部「设置」上面会多出一行「收起全局面板 / 展开全局面板」，
 同时那列全局面板入口消失。**设置 → 内置插件** 里会多出「侧栏面板显示」页，可开关
-网格显示、设置每行图标数，以及收起后仍显示的插件数（列表模式）或行数（网格模式）。
+网格显示、设置每行图标数、收起后仍显示的插件数（列表模式）或行数（网格模式），
+以及自定义插件显示顺序（最多 20 项）与图标尺寸三档（小 / 中 / 大）。
 
 环境要求：带 `web` profile 的 DSH（DeepSeek Harness）；Node.js ≥ 20。
 
@@ -93,10 +98,18 @@ dsh plugin --profile web add /path/to/dsh-toomuch-plugins
    列表 —— 切换它的 `display`；
 3. 把选择写进 `localStorage`；
 4. 通过 `settings.plugins.tab` 槽在 设置 → 内置插件 注册「侧栏面板显示」页，开关
-   网格显示、选择每行 2–4 个图标；
+   网格显示、选择每行 2–4 个图标、选择图标尺寸（小 / 中 / 大）；
 5. 网格套用：给那个 `<nav>` 加一个标记 class + 列数 CSS 变量，隐藏文字 `span`，并把
    每个入口的 `aria-label` 镜像成原生 `title` 当悬停提示（宽栏下 DSH 自己的 Tooltip
-   被禁用，文字也没渲染）。
+   被禁用，文字也没渲染）；
+6. 把自定义显示顺序写成 `<nav>` 直接子元素的 CSS `order` 覆盖（无损重排，不和 React
+   的 DOM 调和打架），收起限额按**视觉顺序**保留前 N 个；
+7. 挂一份手写 Typert 远程贡献（dsh-cost-meter 同款接线），把面板点击报给 Host 半边，
+   由它累加进 `click-counts.json`。
+
+Host 半边（`src/index.js`）只提供 `spcClicks` 这一个服务：原型方法 + 手写
+`typertRemote` 绑定，靠 gateway 的 src 描述符兜底接通 —— 不生成清单、不 import
+DSH 内部包。
 
 依据是 DSH 自己的 `@deepseek-ai/dsh-client-ui-sidebar`：`nav.panelList` 是侧栏根节点的
 直接子元素，所以从底部按钮往上回溯一定能找到它。样式只用 `--dsw-alias-*` 主题变量，
@@ -112,8 +125,8 @@ dsh plugin --profile web add /path/to/dsh-toomuch-plugins
 ├── package.json            插件清单：dsh.bundle.patch + dsh.client
 ├── cordis.patch.yml        往 profile 里插入插件加载行
 ├── src/
-│   ├── index.js            Host 半边（不需要 Host 能力，apply 为空）
-│   └── client.js           Client 半边：底部开关 + 收起/展开 + 网格显示设置页
+│   ├── index.js            Host 半边：spcClicks 远程服务 → click-counts.json
+│   └── client.js           Client 半边：底部开关 + 收起/展开 + 网格 + 显示顺序 + 点击上报
 ├── test/smoke.js           零依赖冒烟检查（node test/smoke.js）
 ├── locale/{en,zh}.json     插件列表里的标题与描述
 ├── docs/                   设计说明、市场提交、提交前清单
