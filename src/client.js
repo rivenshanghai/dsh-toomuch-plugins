@@ -235,15 +235,21 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
     }
 
     /**
-     * Live list of slot panels ({id, label}) for mapping DOM rows back to
-     * panel ids. Refreshed by apply() (which owns the slots context) before
-     * every use; empty until the plugin has applied.
+     * Live list of the selectable panels ({id, label}): every slot panel plus
+     * the DOM-inserted entries that follow the `data-dsh-*-entry` convention
+     * (今日值得读 / 全局搜索 / 容器 … bypass `sidebar.panellist` entirely, so
+     * enumerating the slot alone hides them from the dropdown). Rebuilt on
+     * every call so panels registered late (dsh-context gates its sidebar
+     * entry behind a setting) and entries mounting later still show up.
      */
+    let sidebarRoot = null
+    let panelNav = null
     let listEntries = () => []
     function refreshListEntries(ctx) {
       listEntries = () => {
+        let out = []
         try {
-          return ctx.slots.entriesOfSlot('sidebar.panellist').map((entry) => {
+          out = ctx.slots.entriesOfSlot('sidebar.panellist').map((entry) => {
             const id = entry.options && entry.options.id
             if (typeof id !== 'string' || id === '') return null
             const raw = entry.options.label
@@ -251,19 +257,71 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
             return { id, label: typeof label === 'string' && label !== '' ? label : id }
           }).filter((entry) => entry !== null)
         } catch {
-          return []
+          out = []
         }
+        const seen = new Set(out.map((entry) => entry.id))
+        for (const dom of domEntries()) {
+          if (!seen.has(dom.id)) {
+            seen.add(dom.id)
+            out.push(dom)
+          }
+        }
+        return out
       }
     }
 
-    /** Row → panel id: adopted third-party entries first, then aria-label. */
-    function entryIdOfRow(target) {
-      if (target === null || typeof target.closest !== 'function') return null
-      const adopted = target.closest(ADOPT_ATTRS.map((attr) => `[${attr}]`).join(','))
-      if (adopted !== null) {
-        const attr = ADOPT_ATTRS.find((name) => adopted.hasAttribute(name))
-        return attr === undefined ? null : attr.replace(/^data-dsh-/, '').replace(/-entry$/, '')
+    /**
+     * Entry id parsed from a `data-dsh-*-entry` attribute. CSS has no
+     * attribute-name wildcard, so the names are walked in JS — same rule as
+     * the sidebar convention, and it covers future convention followers
+     * without a hardcoded list.
+     */
+    function domEntryId(el) {
+      if (el === null || el === undefined || typeof el.attributes !== 'object' || el.attributes === null) return null
+      for (const attr of el.attributes) {
+        const name = attr !== null && typeof attr === 'object' && typeof attr.name === 'string' ? attr.name : ''
+        if (!name.startsWith('data-dsh-') || !name.endsWith('-entry')) continue
+        const id = name.slice('data-dsh-'.length).replace(/-entry$/, '')
+        if (id !== '') return id
       }
+      return null
+    }
+
+    /** Convention-follower entries: sidebar-root children plus any adopted into the nav. */
+    function domEntries() {
+      const out = []
+      const seen = new Set()
+      const collect = (children) => {
+        if (!children) return
+        for (const child of children) {
+          const id = domEntryId(child)
+          if (id === null || seen.has(id)) continue
+          seen.add(id)
+          const label =
+            (typeof child.getAttribute === 'function' && (child.getAttribute('aria-label') || child.getAttribute('title'))) || id
+          out.push({ id, label })
+        }
+      }
+      collect(sidebarRoot === null ? null : sidebarRoot.children)
+      collect(panelNav === null ? null : panelNav.children)
+      return out
+    }
+
+    /** Row → panel id: data-dsh-*-entry ancestors first, then aria-label. */
+    function entryIdOfRow(target) {
+      if (target === null || typeof target !== 'object') return null
+      // Clicks land inside the entry (icon, input …), so walk up first.
+      // Scoped to the sidebar's own entries so an unrelated page region that
+      // happens to carry a data-dsh-*-entry attr never counts as a panel.
+      let el = target
+      while (el !== null && typeof el === 'object') {
+        const id = domEntryId(el)
+        if (id !== null) {
+          return listEntries().some((item) => item.id === id) ? id : null
+        }
+        el = el.parentElement
+      }
+      if (typeof target.closest !== 'function') return null
       const row = target.closest('button,[role=button]')
       if (row === null || row.closest('nav') === null) return null
       const label = row.getAttribute('aria-label')
@@ -286,14 +344,20 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
       }
       const entries = listEntries()
       for (const child of nav.children) {
-        const row = child.matches('button,[role=button]')
-          ? child
-          : typeof child.querySelector === 'function'
-            ? child.querySelector('button,[role=button]')
-            : null
-        const label = row === null ? null : row.getAttribute('aria-label')
-        const entry = label === null ? null : entries.find((item) => item.label === label)
-        const index = entry === null || entry === undefined ? -1 : order.indexOf(entry.id)
+        // Adopted entries carry their own data attr (strongest identity);
+        // plain panel rows resolve through their aria-label.
+        let id = domEntryId(child)
+        if (id === null) {
+          const row = child.matches('button,[role=button]')
+            ? child
+            : typeof child.querySelector === 'function'
+              ? child.querySelector('button,[role=button]')
+              : null
+          const label = row === null ? null : row.getAttribute('aria-label')
+          const entry = label === null ? null : entries.find((item) => item.label === label)
+          id = entry === null || entry === undefined ? null : entry.id
+        }
+        const index = id === null ? -1 : order.indexOf(id)
         child.style.setProperty('order', String(index === -1 ? order.length + 1 : index + 1))
       }
     }
@@ -311,6 +375,10 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
       if (rootEl === null) return
       const nav = findPanelNav(rootEl)
       if (nav === null) return
+      // Remember the sidebar root so DOM-entry discovery (dropdown, ordering)
+      // has a scope even before the settings page renders.
+      sidebarRoot = nav.parentElement ?? null
+      panelNav = nav
       // Icon size: only sm/lg need a marker; md means "leave the sidebar's
       // own icon size alone". Re-applied on every render like the rest.
       nav.classList.toggle(SIZE_SM_CLASS, prefs.iconSize === 'sm')
@@ -340,32 +408,31 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
      * skip the `sidebar.panellist` slot and insert their own entry element
      * directly beside the nav, following one shared convention: an attribute
      * named `data-dsh-*-entry`. Grid mode adopts those entries into the nav
-     * so they join the grid, and puts them back where they were when the grid
-     * turns off. Their re-place observers only re-insert an entry once it
-     * leaves the sidebar root entirely — the nav is still inside the root, so
-     * adoption never fights them.
+     * so they join the grid. List mode with a custom display order adopts
+     * only the entries the user actually listed — outside the nav they live
+     * in a different box and CSS `order` cannot reach them, so adoption is
+     * what makes their order real. Adoption is undone when neither applies.
+     * Their re-place observers only re-insert an entry once it leaves the
+     * sidebar root entirely — the nav is still inside the root, so adoption
+     * never fights them.
      */
-    const ADOPT_ATTRS = [
-      'data-dsh-rss-entry',
-      'data-dsh-global-search-entry',
-      'data-dsh-docker-entry',
-      'data-dsh-taskboard-entry',
-      'data-dsh-ssh-entry',
-      'data-dsh-tty-entry',
-    ]
     const ADOPTED_FLAG = 'data-spc-adopted'
     /** Where each adopted entry sat before the grid claimed it. */
     const adoptedBefore = new WeakMap()
 
     function findAdoptable(rootEl) {
-      return rootEl.querySelectorAll(ADOPT_ATTRS.map((a) => `:scope > [${a}]`).join(','))
+      const out = []
+      if (!rootEl || !rootEl.children) return out
+      for (const child of rootEl.children) if (domEntryId(child) !== null) out.push(child)
+      return out
     }
 
-    function adoptEntries(rootEl, nav) {
-      const entries = Array.from(findAdoptable(rootEl))
+    function adoptEntries(rootEl, nav, only) {
+      const entries = findAdoptable(rootEl)
       // Walk backwards so inserting each at the nav head keeps source order.
       for (let i = entries.length - 1; i >= 0; i--) {
         const entry = entries[i]
+        if (only !== undefined && only !== null && !only.includes(domEntryId(entry))) continue
         if (entry.parentElement === nav) continue
         adoptedBefore.set(entry, entry.nextElementSibling)
         entry.setAttribute(ADOPTED_FLAG, '')
@@ -373,12 +440,16 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
       }
     }
 
+    function releaseEntry(rootEl, nav, entry) {
+      const before = adoptedBefore.get(entry)
+      entry.removeAttribute(ADOPTED_FLAG)
+      adoptedBefore.delete(entry)
+      rootEl.insertBefore(entry, before != null && before.parentElement === rootEl ? before : nav)
+    }
+
     function releaseEntries(rootEl, nav) {
       for (const entry of Array.from(nav.querySelectorAll(`[${ADOPTED_FLAG}]`))) {
-        const before = adoptedBefore.get(entry)
-        entry.removeAttribute(ADOPTED_FLAG)
-        adoptedBefore.delete(entry)
-        rootEl.insertBefore(entry, before !== null && before.parentElement === rootEl ? before : nav)
+        releaseEntry(rootEl, nav, entry)
       }
     }
 
@@ -399,8 +470,23 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
       // `rootEl` here is the footer toggle itself; the injected entries are
       // direct children of the sidebar root, which is the nav's parent.
       const sideRoot = nav.parentElement
-      if (!(wide && prefs.grid)) {
+      const order = sanitizeOrder(prefs.order)
+      const gridOn = wide && prefs.grid
+      if (gridOn) {
+        // The grid owns the whole nav: adopt every convention follower.
+        adoptEntries(sideRoot, nav)
+      } else if (order.length > 0) {
+        // List mode: only the entries the user listed join the nav (unlisted
+        // ones keep their default spot outside it), so CSS order can reach
+        // them without dragging unrelated entries out of position.
+        for (const entry of Array.from(nav.querySelectorAll(`[${ADOPTED_FLAG}]`))) {
+          if (!order.includes(domEntryId(entry))) releaseEntry(sideRoot, nav, entry)
+        }
+        adoptEntries(sideRoot, nav, order)
+      } else {
         releaseEntries(sideRoot, nav)
+      }
+      if (!gridOn) {
         if (!nav.classList.contains(GRID_CLASS)) return
         nav.classList.remove(GRID_CLASS)
         nav.style.removeProperty(GRID_COLS_VAR)
@@ -410,7 +496,6 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
         }
         return
       }
-      adoptEntries(sideRoot, nav)
       nav.classList.add(GRID_CLASS)
       nav.style.setProperty(GRID_COLS_VAR, String(prefs.columns))
       // Rows carry their label as aria-label (the sidebar always sets one).
@@ -579,6 +664,15 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
         function DisplaySettingsTab() {
           const [prefs, setPrefsState] = React.useState(readPrefs)
           React.useEffect(() => subscribePrefs(() => setPrefsState(readPrefs())), [])
+          // Panels registered after this tab first rendered (dsh-context
+          // registers its sidebar entry behind a settings gate) re-render the
+          // dropdown as soon as the slot changes.
+          const [, setEntryTick] = React.useState(0)
+          React.useEffect(() => {
+            if (ctx.slots === undefined || typeof ctx.slots.subscribe !== 'function') return undefined
+            const off = ctx.slots.subscribe('sidebar.panellist', () => setEntryTick((n) => n + 1))
+            return typeof off === 'function' ? off : undefined
+          }, [])
           const update = (patch) => writePrefs({ ...readPrefs(), ...patch })
           // A labelled row of single-choice buttons for one pref. The
           // collapsed-limit picker switches with the display mode: plain

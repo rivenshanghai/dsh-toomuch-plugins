@@ -18,11 +18,14 @@ window.__ModuleLoader__ = { load: (mod) => { loaded = mod } }
 
 // --- react stub -----------------------------------------------------------
 // createElement builds a plain tree; hooks are inert so components can be
-// invoked as plain functions during render assertions.
+// invoked as plain functions during render assertions. Effects are captured
+// (not run) so the footer's apply effect can be driven explicitly against a
+// fake sidebar root.
+const effects = []
 const React = {
   createElement: (type, props, ...children) => ({ type, props, children }),
   useState: (init) => [typeof init === 'function' ? init() : init, () => {}],
-  useEffect: () => {},
+  useEffect: (fn) => { if (typeof fn === 'function') effects.push(fn) },
   useRef: (init) => ({ current: init }),
 }
 
@@ -326,13 +329,39 @@ const mkClassList = () => {
   }
 }
 const makeNav = (labels) => {
-  const nav = { style: mkStyle(), classList: mkClassList(), children: [], querySelectorAll: () => nav.children }
+  const detach = (el) => {
+    const list = el.parentElement && Array.isArray(el.parentElement.children) ? el.parentElement.children : null
+    if (list === null) return
+    const at = list.indexOf(el)
+    if (at >= 0) list.splice(at, 1)
+  }
+  const insert = (parent, el, ref) => {
+    detach(el)
+    const at = ref === null || ref === undefined ? -1 : parent.children.indexOf(ref)
+    if (at >= 0) parent.children.splice(at, 0, el)
+    else parent.children.push(el)
+    el.parentElement = parent
+  }
+  const root = { children: [], insertBefore: (el, ref) => insert(root, el, ref) }
+  const nav = {
+    style: mkStyle(), classList: mkClassList(), children: [], parentElement: root,
+    get firstChild() { return nav.children.length > 0 ? nav.children[0] : null },
+    insertBefore: (el, ref) => insert(nav, el, ref),
+    querySelectorAll: (sel) => {
+      if (sel.startsWith('[') && sel.includes('data-spc-adopted')) {
+        return nav.children.filter((c) => c.hasAttribute('data-spc-adopted'))
+      }
+      if (sel.includes('[data-spc-tip]')) return []
+      return nav.children // 'button,[role=button],[data-spc-adopted]' and friends
+    },
+  }
   nav.children = labels.map((label) => {
     const row = {
       style: mkStyle(), hidden: false, parentElement: nav,
       getAttribute: (name) => (name === 'aria-label' ? label : null),
       setAttribute: (name) => { if (name === 'data-spc-hidden') row.hidden = true },
       removeAttribute: (name) => { if (name === 'data-spc-hidden') row.hidden = false },
+      hasAttribute: () => false,
       matches: () => true,
       querySelector: () => null,
     }
@@ -340,15 +369,49 @@ const makeNav = (labels) => {
   })
   return nav
 }
-const runFooterEffect = (nav, storedOrder, collapsedCount, iconSize) => {
+// A convention follower: a sidebar-root child with a `data-dsh-*-entry` attr
+// (今日值得读 / 全局搜索 / 容器 …), with attribute-name reflection for domEntryId.
+const mkEntry = (attr, label) => {
+  const flags = new Map([[attr, '']])
+  const refresh = () => { entry.attributes = [...flags.keys()].map((name) => ({ name })) }
+  const entry = {
+    style: mkStyle(), parentElement: null, hidden: false, attributes: [{ name: attr }],
+    get nextElementSibling() {
+      const siblings = entry.parentElement === null ? [] : entry.parentElement.children
+      const at = siblings.indexOf(entry)
+      return at >= 0 && at + 1 < siblings.length ? siblings[at + 1] : null
+    },
+    getAttribute: (name) => (name === 'aria-label' ? label : flags.has(name) ? flags.get(name) : null),
+    setAttribute: (name, value) => {
+      if (name === 'data-spc-hidden') { entry.hidden = true; return }
+      flags.set(name, value === undefined ? '' : value)
+      refresh()
+    },
+    removeAttribute: (name) => {
+      if (name === 'data-spc-hidden') { entry.hidden = false; return }
+      flags.delete(name)
+      refresh()
+    },
+    hasAttribute: (name) => (name === 'data-spc-hidden' ? entry.hidden : flags.has(name)),
+    matches: () => false,
+    querySelector: () => null,
+  }
+  return entry
+}
+const runFooterEffect = (nav, storedOrder, collapsedCount, iconSize, grid = false) => {
   store.set('dsh.sidebar-panel-collapse', 'expanded') // start expanded so one click collapses
   store.set(prefsKey, JSON.stringify({
-    grid: false, columns: 3, collapsedCount, collapsedRows: 0, order: storedOrder,
+    grid, columns: 3, collapsedCount, collapsedRows: 0, order: storedOrder,
     iconSize: iconSize ?? 'md',
   }))
+  effects.length = 0 // only what this render captures
   const tree = footer.component({ t, wide: true })
   const root = { parentElement: null, querySelector: (sel) => (sel === ':scope > nav' ? nav : null) }
   tree.props.ref.current = root
+  for (const effect of effects) {
+    const cleanup = effect()
+    if (typeof cleanup === 'function') cleanup()
+  }
   tree.children.find((c) => c.type === 'button').props.onClick()
 }
 const domNav = makeNav(['插件', '市场', '日程', '容器'])
@@ -387,6 +450,47 @@ assert.ok(
   'medium -> both markers removed (sidebar default size)',
 )
 
+// --- convention entries (今日值得读 / 全局搜索 / 容器 …) ------------------
+// These insert beside the nav instead of through sidebar.panellist, so they
+// only reach the dropdown (and the order) through the data-dsh-*-entry
+// convention. A custom order adopts the listed ones into the nav — where CSS
+// order can reach them — and dropping the order puts them back.
+const domNav4 = makeNav(['插件', '市场'])
+const fakeRoot = domNav4.parentElement
+const rssEntry = mkEntry('data-dsh-rss-entry', '今日值得读')
+fakeRoot.children.push(rssEntry)
+rssEntry.parentElement = fakeRoot
+
+runFooterEffect(domNav4, ['rss', 'plugins'], 2)
+assert.strictEqual(domNav4.children[0], rssEntry, 'listed DOM entry adopted into the nav')
+assert.deepStrictEqual(
+  domNav4.children.map((row) => row.style.order),
+  ['1', '2', '3'],
+  'data-attr identity orders the adopted entry first',
+)
+assert.deepStrictEqual(
+  domNav4.children.map((row) => row.hidden),
+  [false, false, true],
+  'collapsed limit sees the adopted row in visual order',
+)
+nodes = renderTab()
+const options = flatten(nodes.find((n) => n.type === 'select')).filter((n) => n.type === 'option')
+assert.deepStrictEqual(
+  options.map((n) => n.props.value),
+  ['', 'plugins', 'market', 'schedules', 'rss'],
+  'dropdown includes the DOM-inserted entry',
+)
+assert.strictEqual(
+  options.find((n) => n.props.value === 'rss').children[0],
+  '今日值得读',
+  'DOM entry labelled from its aria-label',
+)
+runFooterEffect(domNav4, [], 2, 'md', true) // grid mode adopts everything
+assert.ok(domNav4.children.includes(rssEntry), 'grid adopts unlisted entries too')
+runFooterEffect(domNav4, [], 2) // back to a plain list with no custom order
+assert.ok(!domNav4.children.includes(rssEntry), 'empty order releases the entry')
+assert.ok(fakeRoot.children.includes(rssEntry), 'released back to the sidebar root')
+
 // --- click counting -------------------------------------------------------
 // The remote contribution mounts (async) and panel clicks get reported.
 await new Promise((resolve) => setTimeout(resolve, 0))
@@ -416,15 +520,27 @@ clickHandler({
 await Promise.resolve()
 assert.deepStrictEqual(recorded, ['plugins'], 'panel click reported by label -> id')
 
-// Adopted third-party entries report an id derived from their data attr.
-clickHandler({ target: { closest: (sel) => (sel.startsWith('[') ? { hasAttribute: (a) => a === 'data-dsh-rss-entry' } : null) } })
+// Convention entries: the id comes from a data-dsh-*-entry attribute found by
+// walking up from the click target (icons / inputs sit below the entry), and
+// only counts when the entry is part of the sidebar (the last applied root).
+const dockerEntry = mkEntry('data-dsh-docker-entry', '容器')
+fakeRoot.children.push(dockerEntry)
+dockerEntry.parentElement = fakeRoot
+clickHandler({ target: { parentElement: { attributes: [{ name: 'data-dsh-docker-entry' }] } } })
 await Promise.resolve()
-assert.deepStrictEqual(recorded, ['plugins', 'rss'], 'adopted entry click reported')
+assert.deepStrictEqual(recorded, ['plugins', 'docker'], 'click inside an entry reports its id')
+clickHandler({ target: { attributes: [{ name: 'data-dsh-rss-entry' }] } })
+await Promise.resolve()
+assert.deepStrictEqual(recorded, ['plugins', 'docker', 'rss'], 'entry itself reports its id')
 
-// Anything else (no panel label, not in the sidebar) is ignored.
-clickHandler({ target: { closest: (sel) => (sel.startsWith('[') ? null : { closest: () => null, getAttribute: () => null }) } })
+// Anything else (no entry ancestor, no panel label, not in the sidebar) is ignored.
+clickHandler({ target: { parentElement: null } })
 await Promise.resolve()
-assert.strictEqual(recorded.length, 2, 'non-panel click ignored')
+clickHandler({
+  target: { parentElement: { attributes: [{ name: 'data-dsh-outside-entry' }], parentElement: null } },
+})
+await Promise.resolve()
+assert.strictEqual(recorded.length, 3, 'non-panel / out-of-scope clicks ignored')
 
 // --- host half ------------------------------------------------------------
 // The Typert service counts clicks into <DSH_HOME>/plugins/.../click-counts.json.

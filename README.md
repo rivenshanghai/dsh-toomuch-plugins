@@ -57,7 +57,10 @@ entries**, and bring it back when you need it.
   (rows × icons). Default 0, i.e. everything collapsed.
 - **Plugin display order** — pick panels one by one from a dropdown on the
   settings page; the list order is the sidebar order (lossless CSS `order`
-  overrides). Capped at 20, duplicates dropped on save.
+  overrides). Capped at 20, duplicates dropped on save. The dropdown also
+  lists slot-skipping sidebar entries (今日值得读 / 全局搜索 / 容器 and other
+  `data-dsh-*-entry` followers); listed ones are adopted into the list so the
+  order really applies, and released when the order is cleared.
 - **Click counting** — panel clicks accumulate into
   `~/.dsh/plugins/dsh-toomuch-plugins/click-counts.json`, (silently skipped when the remote is unavailable).
 - **Icon size** — pick small (12px), medium (the sidebar's own size, the
