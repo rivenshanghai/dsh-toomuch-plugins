@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased / 未发布
 
+## 0.3.1 (2026-11-03)
+
+### Fixed / 修复
+
+- **Order picker is drawn by the page, not by a native `<select>`** — a native `<select>` popup is painted by the browser or the OS, so page CSS cannot reach it: in the dark theme its rows stayed unreadable, and the invisible popup still swallowed clicks and wheel events, which left the settings page unscrollable. The 「插件显示顺序」 picker is now a page-drawn dropdown — a trigger button plus a list of item buttons, all on theme tokens — that expands in flow so a scrolling panel can never crop it, closes on Escape or an outside click, and keeps the 20-entry cap and the disabled state. / **顺序下拉改为页面自绘，不再用原生 `<select>`** —— 原生下拉弹层由浏览器或操作系统绘制，页面 CSS 够不着：深色主题下它的列表文字看不见，而看不见的弹层照样吞掉点击与滚轮，于是设置页也滚不动。现在「插件显示顺序」改由页面自绘下拉（触发按钮 + 列表项按钮，配色全走主题 token），在文档流内展开、滚动面板不会裁掉它，Esc 或点外部关闭，20 项上限与禁用态照旧。
+
 ## 0.3.0 (2026-10-30)
 
 ### Added / 新增
@@ -42,7 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sidebar panel collapse** — collapses the global-panel entry list above the workspace in the DSH Web left sidebar into a single toggle in the sidebar footer. The choice is remembered in `localStorage` and survives reloads. / **侧栏面板收起** —— 把 DSH Web 左栏工作区上方的全局面板入口收起成侧栏底部的一个开关，选择记在 `localStorage` 里，刷新后保持。
 - Works in the narrow 56px rail, where the toggle collapses into a round icon button. / 窄栏（56px rail）下自动变成圆钮。
 
-[Unreleased]: https://github.com/rivenshanghai/dsh-toomuch-plugins/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/rivenshanghai/dsh-toomuch-plugins/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/rivenshanghai/dsh-toomuch-plugins/releases/tag/v0.3.1
 [0.3.0]: https://github.com/rivenshanghai/dsh-toomuch-plugins/releases/tag/v0.3.0
 [0.2.0]: https://github.com/rivenshanghai/dsh-toomuch-plugins/releases/tag/v0.2.0
 [0.1.1]: https://github.com/rivenshanghai/dsh-toomuch-plugins/releases/tag/v0.1.1
