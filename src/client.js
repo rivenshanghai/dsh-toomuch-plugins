@@ -126,8 +126,29 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
 .dsh-spc-col.dsh-spc-colOn{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-state-business-primary);}
 .dsh-spc-col:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px;}
 .dsh-spc-col:disabled{cursor:default;opacity:.45;}
-.dsh-spc-select{cursor:pointer;flex:1;min-width:0;height:28px;color:var(--dsw-alias-label-primary);background:0 0;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-sm);padding:0 6px;font:inherit;}
-.dsh-spc-select:disabled{cursor:default;opacity:.5;}
+/* The plugin-order picker. A native <select> popup is drawn by the browser
+   (or by the OS), so it cannot follow the app theme: in dark mode its rows
+   stayed unreadable, and an unreadable popup still swallowed the click and
+   left the settings page unable to scroll. This dropdown is drawn by the page
+   itself, so the theme tokens always apply and nothing grabs the input.
+   The list expands in flow (not absolutely positioned) so a scrolling
+   settings panel can never crop it. */
+.dsh-spc-drop{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;}
+.dsh-spc-dropBtn{cursor:pointer;width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;height:28px;padding:0 8px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-sm);font:inherit;text-align:left;}
+.dsh-spc-dropBtn:hover{background:var(--dsw-alias-interactive-bg-hover);}
+.dsh-spc-dropBtn:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px;}
+.dsh-spc-dropBtn:disabled{cursor:default;opacity:.45;}
+.dsh-spc-dropText{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+.dsh-spc-dropArrow{flex:none;color:var(--dsw-alias-label-secondary);font-size:10px;}
+.dsh-spc-dropList{display:none;margin:0;padding:4px;list-style:none;max-height:240px;overflow-y:auto;background:var(--dsw-alias-bg-layer-3);border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-sm);}
+.dsh-spc-dropOpen .dsh-spc-dropList{display:block;}
+.dsh-spc-dropItem{margin:0;}
+.dsh-spc-dropItemBtn{cursor:pointer;display:block;width:100%;padding:6px 8px;border:0;border-radius:6px;background:0 0;color:var(--dsw-alias-label-primary);font:inherit;text-align:left;}
+.dsh-spc-dropItemBtn:hover,.dsh-spc-dropItemBtn:focus-visible{background:var(--dsw-alias-interactive-bg-hover);outline:none;}
+/* The open list makes the row taller, so the caption stays on the button's
+   top line instead of floating in the middle of the list. */
+.dsh-spc-setRowDrop{align-items:flex-start;}
+.dsh-spc-setRowDrop .dsh-spc-setCaption{line-height:28px;}
 `
 
     /**
@@ -664,6 +685,20 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
         function DisplaySettingsTab() {
           const [prefs, setPrefsState] = React.useState(readPrefs)
           React.useEffect(() => subscribePrefs(() => setPrefsState(readPrefs())), [])
+          // The plugin-order dropdown is drawn by the page (a native <select>
+          // popup is painted by the browser and cannot follow the theme), so
+          // it needs its own open state plus a click-outside to close it.
+          const [dropOpen, setDropOpen] = React.useState(false)
+          React.useEffect(() => {
+            if (!dropOpen || typeof document === 'undefined') return undefined
+            const onDown = (event) => {
+              const target = event.target
+              if (target && typeof target.closest === 'function' && target.closest('.dsh-spc-drop') !== null) return
+              setDropOpen(false)
+            }
+            document.addEventListener('click', onDown)
+            return () => document.removeEventListener('click', onDown)
+          }, [dropOpen])
           // Panels registered after this tab first rendered (dsh-context
           // registers its sidebar entry behind a settings gate) re-render the
           // dropdown as soon as the slot changes.
@@ -741,7 +776,7 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
               }
               const full = order.length >= ORDER_MAX
               const add = (value) => {
-                if (value === '' || full) return
+                if (full) return
                 update({ order: [...order, value] })
               }
               const move = (index, delta) => {
@@ -755,18 +790,51 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
               return [
                 h(
                   'div',
-                  { className: 'dsh-spc-setRow', key: 'order' },
+                  { className: 'dsh-spc-setRow dsh-spc-setRowDrop', key: 'order' },
                   h('span', { className: 'dsh-spc-setCaption' }, t('orderTitle')),
                   h(
-                    'select',
+                    'div',
                     {
-                      className: 'dsh-spc-select',
-                      value: '',
-                      disabled: full || entries.length === 0,
-                      onChange: (event) => add(event.target.value),
+                      className: 'dsh-spc-drop' + (dropOpen ? ' dsh-spc-dropOpen' : ''),
+                      onKeyDown: (event) => {
+                        if (event.key === 'Escape') setDropOpen(false)
+                      },
                     },
-                    h('option', { value: '' }, t('orderPick')),
-                    entries.map((entry) => h('option', { key: entry.id, value: entry.id }, entry.label)),
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'dsh-spc-dropBtn',
+                        'aria-haspopup': 'true',
+                        'aria-expanded': dropOpen,
+                        disabled: full || entries.length === 0,
+                        onClick: () => setDropOpen((v) => !v),
+                      },
+                      h('span', { className: 'dsh-spc-dropText' }, t('orderPick')),
+                      h('span', { className: 'dsh-spc-dropArrow' }, '▾'),
+                    ),
+                    h(
+                      'ul',
+                      { className: 'dsh-spc-dropList' },
+                      entries.map((entry) =>
+                        h(
+                          'li',
+                          { key: entry.id, className: 'dsh-spc-dropItem' },
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'dsh-spc-dropItemBtn',
+                              onClick: () => {
+                                add(entry.id)
+                                setDropOpen(false)
+                              },
+                            },
+                            entry.label,
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
                 h(

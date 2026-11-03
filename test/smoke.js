@@ -257,25 +257,36 @@ const captionHas = (nodes, key) =>
   )
 
 nodes = renderTab()
-const select = nodes.find((n) => n.type === 'select')
-assert.ok(select, 'order dropdown rendered')
-assert.strictEqual(select.props.disabled, false, 'dropdown enabled under the cap')
-assert.strictEqual(select.props.value, '', 'dropdown resets to the placeholder')
+// The picker is drawn by the page, not by the browser: a native <select>
+// popup cannot follow the theme (unreadable rows in dark mode) and its
+// invisible popup swallowed the click and the wheel, which left the settings
+// page looking frozen. So the dropdown is a button + a list of buttons.
+const dropBtn = nodes.find((n) => hasCls(n, 'dsh-spc-dropBtn'))
+assert.ok(dropBtn, 'order dropdown rendered')
+assert.strictEqual(dropBtn.props.disabled, false, 'dropdown enabled under the cap')
+assert.strictEqual(dropBtn.props['aria-expanded'], false, 'dropdown starts closed')
+assert.strictEqual(nodes.find((n) => n.type === 'select'), undefined, 'no native select left')
+const dropItems = (list) => list.filter((n) => hasCls(n, 'dsh-spc-dropItemBtn'))
 assert.deepStrictEqual(
-  flatten(select).filter((n) => n.type === 'option').map((n) => n.props.value),
-  ['', 'plugins', 'market', 'schedules'],
-  'dropdown lists every panel plus the placeholder',
+  dropItems(nodes).map((n) => n.children[0]),
+  ['插件', '市场', '日程'],
+  'dropdown lists every panel',
 )
 assert.ok(captionHas(nodes, 'orderEmpty'), 'empty order shows the default-order hint')
 
-// Adding: the picked id is appended; picking it again is deduped on save.
-select.props.onChange({ target: { value: 'market' } })
+// Adding: the picked panel is appended; picking it again is deduped on save.
+const pickPanel = (list, label) => {
+  const item = dropItems(list).find((n) => n.children[0] === label)
+  assert.ok(item, 'dropdown item "' + label + '"')
+  item.props.onClick()
+}
+pickPanel(nodes, '市场')
 assert.deepStrictEqual(JSON.parse(store.get(prefsKey)).order, ['market'], 'first add stored')
 nodes = renderTab()
-nodes.find((n) => n.type === 'select').props.onChange({ target: { value: 'market' } })
+pickPanel(nodes, '市场')
 assert.deepStrictEqual(JSON.parse(store.get(prefsKey)).order, ['market'], 'duplicate add dropped on save')
 nodes = renderTab()
-nodes.find((n) => n.type === 'select').props.onChange({ target: { value: 'plugins' } })
+pickPanel(nodes, '插件')
 assert.deepStrictEqual(JSON.parse(store.get(prefsKey)).order, ['market', 'plugins'], 'second add stored')
 
 // Ordered rows render in list order with up/down/remove controls.
@@ -302,7 +313,7 @@ store.set(prefsKey, JSON.stringify({
 }))
 nodes = renderTab()
 assert.strictEqual(orderRowNodes(nodes).length, 20, 'stored list sanitizes to 20 unique entries')
-assert.strictEqual(nodes.find((n) => n.type === 'select').props.disabled, true, 'dropdown disabled at the cap')
+assert.strictEqual(nodes.find((n) => hasCls(n, 'dsh-spc-dropBtn')).props.disabled, true, 'dropdown disabled at the cap')
 
 // Corrupt / wrongly-typed order values fall back to the empty list.
 store.set(prefsKey, '{"grid":false,"columns":3,"collapsedCount":0,"collapsedRows":0,"order":"plugins"}')
@@ -474,16 +485,36 @@ assert.deepStrictEqual(
   'collapsed limit sees the adopted row in visual order',
 )
 nodes = renderTab()
-const options = flatten(nodes.find((n) => n.type === 'select')).filter((n) => n.type === 'option')
 assert.deepStrictEqual(
-  options.map((n) => n.props.value),
-  ['', 'plugins', 'market', 'schedules', 'rss'],
+  dropItems(nodes).map((n) => n.children[0]),
+  ['插件', '市场', '日程', '今日值得读'],
   'dropdown includes the DOM-inserted entry',
 )
-assert.strictEqual(
-  options.find((n) => n.props.value === 'rss').children[0],
-  '今日值得读',
-  'DOM entry labelled from its aria-label',
+// The dropdown is drawn by the page, so the theme reaches the list itself —
+// a native <select> popup is painted by the browser and stays unreadable.
+const setCss = nodes.find((n) => n.type === 'style').children[0]
+const cssRule = (selector) => {
+  const match = new RegExp(selector.replace(/[.[\]]/g, '\\$&') + '\\{([^}]*)\\}').exec(setCss)
+  assert.ok(match, 'style rule ' + selector)
+  return match[1]
+}
+const btnRule = cssRule('.dsh-spc-dropBtn')
+assert.ok(
+  btnRule.includes('background:var(--dsw-alias-bg-layer-3)') &&
+    btnRule.includes('color:var(--dsw-alias-label-primary)'),
+  'the trigger paints the theme surface and text colour',
+)
+assert.ok(
+  cssRule('.dsh-spc-dropList').includes('background:var(--dsw-alias-bg-layer-3)'),
+  'the list paints the theme surface',
+)
+assert.ok(
+  cssRule('.dsh-spc-dropItemBtn').includes('color:var(--dsw-alias-label-primary)'),
+  'the items carry the theme text colour',
+)
+assert.ok(
+  !/\.dsh-spc-select/.test(setCss),
+  'no native-select styling left',
 )
 runFooterEffect(domNav4, [], 2, 'md', true) // grid mode adopts everything
 assert.ok(domNav4.children.includes(rssEntry), 'grid adopts unlisted entries too')
