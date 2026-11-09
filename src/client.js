@@ -167,7 +167,10 @@ window.__ModuleLoader__.load({
     }
 
     const CSS = `
-.dsh-spc-layer{flex:1 1 auto;min-width:0;align-items:center;width:auto;height:42px;margin:8px 0 0;display:flex;position:relative;box-sizing:border-box;}
+/* The layer claims a full line of the shared footer row: the collapse toggle
+   and the activity icon share that line, and every other footer action keeps
+   its own. Shrinking to content here lets a neighbour slide in beside us. */
+.dsh-spc-layer{flex:none;align-items:center;width:100%;height:42px;margin:8px 0 0;display:flex;position:relative;box-sizing:border-box;}
 .dsh-spc-layer.dsh-spc-rail{flex:none;width:36px;height:auto;margin:0;flex-direction:column;gap:4px;}
 .dsh-spc-row{box-sizing:border-box;flex:1 1 auto;min-width:0;height:42px;color:var(--dsw-alias-label-primary);cursor:pointer;background:0 0;border:none;border-radius:12px;align-items:center;gap:8px;margin:0 -2px;padding:0 10px 0 8px;font-family:inherit;font-size:14px;text-align:left;display:inline-flex;overflow:hidden;}
 .dsh-spc-row:hover{background:var(--dsw-alias-interactive-bg-hover);}

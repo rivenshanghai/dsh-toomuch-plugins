@@ -135,6 +135,31 @@ const histBtn = footerButtons[1]
 assert.strictEqual(histBtn.props.className, 'dsh-spc-histBtn', 'activity icon button')
 assert.strictEqual(histBtn.props['aria-label'], 't:history', 'activity icon is labelled')
 
+// The layer must claim a whole line of the shared footer row. Shrinking it to
+// content slides a neighbouring footer action in beside the toggle, and a row
+// wider than the layer pushes this icon out of view.
+const footerCss = footerTree.children.find((c) => c.type === 'style').children[0]
+const footerRule = (selector) => {
+  const match = new RegExp(selector.replace(/[.[\]]/g, '\\$&') + '\\{([^}]*)\\}').exec(footerCss)
+  assert.ok(match, 'style rule ' + selector)
+  return match[1]
+}
+const layerRule = footerRule('.dsh-spc-layer')
+assert.ok(layerRule.includes('flex:none'), 'the layer does not shrink')
+assert.ok(layerRule.includes('width:100%'), 'the layer claims a full footer line')
+assert.ok(
+  !footerCss.includes('calc(100% + 4px)'),
+  'no row overhangs the layer and pushes the icon out',
+)
+assert.ok(
+  footerRule('.dsh-spc-row').includes('flex:1 1 auto'),
+  'the toggle yields room to the icon',
+)
+assert.ok(
+  footerRule('.dsh-spc-histBtn').includes('flex:none'),
+  'the icon keeps its size next to the toggle',
+)
+
 // --- the activity window --------------------------------------------------
 // Driven through its real open handler and remote call. The fake remote
 // answers the way DSH's transport does — an `{ ok, value }` envelope — so
