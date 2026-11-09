@@ -23,8 +23,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-/** How long a removal waits for a possible upgrade before it counts as one. */
-const REMOVE_GRACE_MS = 3000
+/**
+ * How long a written removal stays retractable as the start of a two-step
+ * upgrade: DSH upgrades by removing the package and installing it again, and
+ * both steps run npm, so the gap is seconds to minutes.
+ * ponytail: an upgrade slower than this leaves the removal in the log.
+ */
+const REMOVE_GRACE_MS = 10 * 60 * 1000
 /** Enable/disable records older than this are not shown (a rolling month). */
 const TOGGLE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 /** Cap on the stored log — ponytail: this is a log, not a database. */
@@ -211,8 +216,8 @@ export function createRecorder(ctx, options = {}) {
   const graceMs = Number.isFinite(options.removeGraceMs) ? options.removeGraceMs : REMOVE_GRACE_MS
   /** Package name -> version currently on disk. */
   const installed = new Map()
-  /** Package name -> a removal that has not been recorded yet. */
-  const pending = new Map()
+  /** Package name -> the removal just written, which an upgrade must retract. */
+  const recent = new Map()
   /** Package names whose installation is running right now. */
   const installing = new Set()
   /** Operation id -> plugin name, resolved while the entry was still loaded. */
@@ -251,13 +256,32 @@ export function createRecorder(ctx, options = {}) {
     }
   }
 
-  /** Record the removals that no installation has claimed. */
-  function flush(now) {
-    for (const [name, removal] of [...pending]) {
-      if (installing.has(name)) continue
-      if (now - removal.at < graceMs) continue
-      pending.delete(name)
-      append(removal.event)
+  /** Drop one record again: an upgrade retracts the removal it started with. */
+  function retract(event) {
+    const events = readLog(file)
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const candidate = events[index]
+      if (
+        candidate.action === event.action &&
+        candidate.name === event.name &&
+        candidate.time === event.time &&
+        candidate.version === event.version
+      ) {
+        events.splice(index, 1)
+        try {
+          writeLog(file, events)
+        } catch {
+          // Disk unavailable: the record stays, nothing worse happens.
+        }
+        return
+      }
+    }
+  }
+
+  /** Forget removals too old to be the start of a two-step upgrade. */
+  function prune(now) {
+    for (const [name, removal] of [...recent]) {
+      if (now - removal.at >= graceMs) recent.delete(name)
     }
   }
 
@@ -282,20 +306,20 @@ export function createRecorder(ctx, options = {}) {
     installing.delete(name)
     if (!applied(operation)) return
     const version = profileDependencies(ctx)[name] ?? null
-    const removal = pending.get(name)
+    const removal = recent.get(name)
     if (removal !== undefined) {
-      pending.delete(name)
+      recent.delete(name)
       const upgraded =
         removal.event.version !== null &&
         version !== null &&
         removal.event.version !== version
       if (upgraded) {
-        // An upgrade: the removal and the new version are both left out.
+        // An upgrade: retract the removal, and leave the installation out.
+        retract(removal.event)
         installed.set(name, version)
         return
       }
-      // A real re-install: the removal happened first and stays.
-      append(removal.event)
+      // A real re-install: the removal stays, the installation follows it.
       installed.set(name, version)
       append({ action: 'install', name, version, time: stamp(operation) })
       return
@@ -317,11 +341,13 @@ export function createRecorder(ctx, options = {}) {
     if (!applied(operation)) return
     const version = typeof operation.version === 'string' ? operation.version : (installed.get(name) ?? null)
     installed.delete(name)
-    // Held back: an upgrade removes the package first and installs it again.
-    pending.set(name, {
-      at: Date.now(),
-      event: { action: 'remove', name, version, time: stamp(operation) },
-    })
+    // Written at once: a removal is usually followed by a restart, and a
+    // record kept only in memory would be lost before anyone reads the log.
+    const event = { action: 'remove', name, version, time: stamp(operation) }
+    append(event)
+    // Held as retractable, not withheld: an upgrade removes the package and
+    // installs it again, and that second step retracts this record.
+    recent.set(name, { at: Date.now(), event })
   }
 
   /** A plugin or a plugin bundle was switched on or off. */
@@ -366,6 +392,7 @@ export function createRecorder(ctx, options = {}) {
   /** Handle one plugin-manager operation. */
   async function handle(operation) {
     if (operation === null || typeof operation !== 'object') return
+    prune(Date.now())
     const reason = operation.reason
     if (reason === 'install') return onInstall(operation)
     if (reason === 'remove') return onRemove(operation)
@@ -378,7 +405,6 @@ export function createRecorder(ctx, options = {}) {
    */
   function list() {
     const now = Date.now()
-    flush(now)
     const cutoff = now - TOGGLE_WINDOW_MS
     const installRemove = []
     const enableDisable = []

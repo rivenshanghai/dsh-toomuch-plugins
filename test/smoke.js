@@ -757,8 +757,10 @@ const historyMarker = Object.getPrototypeOf(historySvc)['@deepseek-ai/dsh-typert
 assert.deepStrictEqual(historyMarker.methods.map((m) => m.method), ['list'], 'history remote method')
 assert.ok(listeners['plugin-manager/operation'], 'host listens for plugin-manager/operation')
 
-const { createRecorder } = await import('../src/history.js')
-const recorder = createRecorder(hostCtx, { removeGraceMs: 0 })
+const { createRecorder, historyFile: historyPath } = await import('../src/history.js')
+// How long a removal stays retractable as the start of a two-step upgrade.
+const UPGRADE_WINDOW = 60_000
+const recorder = createRecorder(hostCtx, { removeGraceMs: UPGRADE_WINDOW })
 const op = (fields) => recorder.handle({ id: 'op-1', phase: 'settled', application: 'applied', time: '2026-11-01T00:00:00.000Z', ...fields })
 
 // An install of a package the profile did not have.
@@ -833,6 +835,25 @@ log = recorder.list()
 assert.ok(!log.enableDisable.some((e) => e.name === 'dsh-mcp' && e.time === old), 'old toggles are hidden')
 assert.strictEqual(log.installRemove.length, 3, 'installs and removals are all kept')
 
+// A removal reaches the disk as it settles, not when the window is opened:
+// a removal is usually followed by a restart, and a record held in memory
+// would be lost before anyone reads it.
+manifest({ 'dsh-old': '1.0.0', 'dsh-gone': '3.0.0' })
+await op({ reason: 'install', stage: 'install', target: 'dsh-gone' })
+manifest({ 'dsh-old': '1.0.0' })
+await op({ reason: 'remove', stage: 'remove', target: 'dsh-gone', version: '3.0.0' })
+const onDisk = () => JSON.parse(fs.readFileSync(historyPath(), 'utf8')).events
+assert.ok(
+  onDisk().some((e) => e.action === 'remove' && e.name === 'dsh-gone'),
+  'the removal is written before the window is opened',
+)
+const afterRestart = createRecorder(hostCtx, { removeGraceMs: UPGRADE_WINDOW })
+assert.ok(
+  afterRestart.list().installRemove.some((e) => e.action === 'remove' && e.name === 'dsh-gone'),
+  'a restarted host still shows the removal',
+)
+
+
 // The log is returned newest first, by time.
 manifest({ 'dsh-old': '1.0.0', 'dsh-late': '1.0.0' })
 await recorder.handle({ id: 'op-5', reason: 'install', stage: 'install', target: 'dsh-late', phase: 'settled', application: 'applied', time: '2026-12-01T00:00:00.000Z' })
@@ -857,12 +878,12 @@ const pluginDir = path.join(profileDir, 'node_modules', 'dsh-scan')
 fs.mkdirSync(pluginDir, { recursive: true })
 fs.writeFileSync(path.join(pluginDir, 'package.json'), JSON.stringify({ name: 'dsh-scan', version: '3.0.0', dsh: { bundle: 'cordis.patch.yml' } }))
 manifest({ 'dsh-old': '1.0.0', 'dsh-scan': '3.0.0' }, ['dsh-scan'])
-const fresh = createRecorder(hostCtx, { removeGraceMs: 0 })
+const fresh = createRecorder(hostCtx, { removeGraceMs: UPGRADE_WINDOW })
 const freshLog = fresh.list()
 assert.ok(freshLog.installRemove.some((e) => e.name === 'dsh-scan' && e.baseline === true), 'the scan records what was installed')
 assert.ok(freshLog.enableDisable.some((e) => e.name === 'dsh-scan' && e.action === 'enable' && e.baseline === true), 'the scan records the state')
 assert.ok(!freshLog.installRemove.some((e) => e.name === 'dsh-old'), 'packages without a bundle are not plugins')
-const scannedAgain = createRecorder(hostCtx, { removeGraceMs: 0 })
+const scannedAgain = createRecorder(hostCtx, { removeGraceMs: UPGRADE_WINDOW })
 assert.strictEqual(scannedAgain.list().installRemove.length, freshLog.installRemove.length, 'the scan runs once')
 process.env.DSH_HOME = previousHome
 fs.rmSync(baselineHome, { recursive: true, force: true })

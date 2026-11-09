@@ -6,14 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## Unreleased / 未发布
-
 ## 0.4.0 (2026-11-09)
 
 ### Added / 新增
 
 - **Plugin activity log** — the sidebar footer gains an icon right of the 「收起 / 展开全局面板」 toggle; clicking it opens a window with two tabs: 「安装/删除」 (every record) and 「启用/禁用」 (the last month). The host half listens for DSH's `plugin-manager/operation` events and writes what was installed, removed, enabled or disabled — with the plugin name and the time — to `~/.dsh/plugins/dsh-toomuch-plugins/plugin-history.json` . Upgrades are left out: DSH performs one as a removal plus an installation of the same package, so a removal followed by an installation of a *different* version is recognised as an upgrade and both records are dropped. A version exemption also changes a bundle without switching anything, so a toggle only counts when the enablement state really changed. / **插件操作记录** —— 侧栏底部在「收起 / 展开全局面板」按钮右侧多一个图标，点开是一个带两个标签的窗口：「安装/删除」（全量）与「启用/禁用」（最近一个月）。Host 半边监听 DSH 的 `plugin-manager/operation` 事件，把安装、删除、启用、禁用的插件名与时间写入 `~/.dsh/plugins/dsh-toomuch-plugins/plugin-history.json` 。升级不计入：DSH 的升级就是「先删后装同一个包」，所以「删除后紧跟一个不同版本的重装」会被判定为升级，两条记录一并丢弃。版本豁免同样只动 bundle 而不改变开关状态，因此只有开关状态真的变了才算一次启停。
 - **First-run scan** — the first time the plugin runs in a profile it has no history yet, so it scans the profile once and records the plugins that were already there (and whether they are enabled) as the starting point. Those rows carry the scan time with an 「初始」 marker, so the time column is never blank. / **首次扫描** —— 插件在某 profile 首次运行时还没有历史，于是扫一遍 profile，把已经装着的插件（以及它们当前是开是关）作为起点记下来；这些行带上扫描时间并标一个「初始」小标记，时间列不会空着。
+
+### Fixed / 修复
+
+- **A removal was lost when the window was not opened at the right moment** — removals used to be held in memory for a few seconds (to tell an upgrade apart) and written only when the window asked for the log. Delete a plugin and open the window at once and nothing was written; close the window and the record never reached the disk at all, and a restart dropped it outright. A removal is now written as it settles and an upgrade retracts that record afterwards, so the log no longer depends on when the window happens to be opened. / **删除记录会漏掉** —— 删除原先在内存里压几秒（为了识别升级），只有窗口来取日志时才写盘。删完立刻开窗口，什么都不会写；关掉窗口后这条记录就再也到不了磁盘，重启更是直接丢。现在删除一确认就落盘，升级再把那条回撤掉，日志不再取决于窗口什么时候被打开。
 
 ### Changed / 变更
 
