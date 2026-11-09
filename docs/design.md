@@ -140,9 +140,9 @@ class 名可能被构建工具 hash 或改名，而「直接子元素 `<nav>`」
 | 文件 | 角色 |
 | --- | --- |
 | `src/index.js` | Host 半边。提供 `spcClicks` / `spcHistory` 两个 Typert 远程服务（手写 `typertRemote` 绑定 + 原型方法标记，走 gateway 的 src 描述符兜底），并把客户端报来的面板点击累加进 `click-counts.json` |
-| `src/history.js` | Host 半边。插件操作记录器：监听 `plugin-manager/operation`，写出 `plugin-history.json`，负责升级识别、启停状态比对与首次扫描 |
+| `src/history.js` | Host 半边。插件操作记录器：定时（5 秒）并随窗口打开时比对 profile 清单与上次记下的快照，差异写进 `plugin-history.json`，负责升级识别与首次扫描 |
 | `src/client.js` | Client 半边。全部逻辑在这里：`FooterToggle`（折叠 + 网格 + 顺序套用 + 操作记录图标）、`ActivityWindow`（操作记录窗口，注册在 `shell.overlay`）、`DisplaySettingsTab`（设置页）、localStorage 读写与偏好广播、点击采集与 `$mount` 远程贡献 |
-| `test/smoke.js` | 零依赖冒烟检查：`node test/smoke.js`。桩掉 `window.__ModuleLoader__` / react，断言两个槽注册的元数据 + 设置页读写偏好的默认值规则。不进 npm 包 |
+| `test/smoke.js` | 零依赖冒烟检查：`node test/smoke.js`。桩掉 `window.__ModuleLoader__` / react，断言两个槽注册的元数据、设置页读写偏好的默认值规则，以及操作记录对清单变化的反应。不进 npm 包 |
 | `cordis.patch.yml` | 往 profile 里插入一行插件加载记录（包名 `dsh-toomuch-plugins`，即仓库根） |
 | `locale/{en,zh}.json` | 插件列表里显示的标题和描述 |
 
@@ -153,37 +153,36 @@ class 名可能被构建工具 hash 或改名，而「直接子元素 `<nav>`」
 
 ### 数据来源
 
-DSH 的插件管理器（`@deepseek-ai/dsh-plugin-manager`）在每次安装、删除、启用/禁用、
-版本豁免时都会 `ownerContext.parallel('plugin-manager/operation', operation)` 发一个事件。
-事件形状（取自插件管理器源码）：
+**不比听事件，比状态。** 早先的实现监听 DSH 插件管理器的 `plugin-manager/operation`
+事件，实测漏记录：这个事件只在应用内那条路径（设置里的插件页）发出来，而装/删插件
+还可以发生在插件市场、`dsh` 命令行，那些路径根本不会往运行中的应用发事件 —— 市场是
+shell 出去调 CLI 的。既然只有部分路径会广播，就不能靠广播。
 
-| 字段 | 含义 |
-| --- | --- |
-| `reason` | `install` / `remove` / `plugin`（单个插件开关）/ `bundle`（插件包开关）；版本豁免也走 `bundle` |
-| `stage` | `install` / `remove` / `enable` |
-| `target` | 包名（安装 / 删除 / 包开关）或 loader entry id（单个插件开关） |
-| `enabled` | 开关请求的目标状态 |
-| `phase` | `started`（操作前）/ `settled`（操作后） |
-| `application` | `applied` / `restart-required` / `overridden` / `failed` / `cancelled` |
-| `version` | 操作涉及的版本（删除时是被删包的版本） |
-| `time` | ISO 时间戳 |
+所有路径唯一都改的东西是 **profile 清单**（`<profile>/package.json`）：
 
-Host 半边在 `ctx.on('plugin-manager/operation', ...)` 上挂监听 —— cordis 的事件总线是
-app 级共享的，别的插件发的事件这里收得到。**只记 `settled` 且 `application` 不是
-`failed` / `cancelled` 的操作。**
+- `dependencies`：装了什么、版本是多少 —— 安装 = 键出现，删除 = 键消失；
+- `dsh.profile.bundles`：哪些插件包是启用的 —— 键在这个数组里 = 启用。
+
+所以记录器每隔 `SYNC_INTERVAL_MS`（5 秒）以及窗口打开时，把清单和日志里上次记下的
+快照（`known`）比一次，把差异写成记录。
+
+代价与边界：
+
+- 时间戳是**发现时间**，不是精确的操作时间，误差在一个轮询周期内。
+- 两次比对之间发生的「删了又装回同一版本」会互相抵消、不留记录。（升级本来也不该留。）
+- 单个 loader entry 的开关（`reason: 'plugin'`，不经 manifest）不在覆盖范围内 —— 它只
+  出现在插件的内部启用状态里，没有可比的持久化清单项。**这是有意为之的取舍**，见下方
+  「后续扩展」。
 
 ### 名称怎么来
 
-- 安装 / 删除 / 包开关：`target` 就是包名。
-- 单个插件开关：`target` 是 loader entry id，用 `pluginInventory.list()` 换成模块名
-  （拿不到就退回 `pluginManager.listPlugins()`）。**必须在 `started` 阶段换**：插件被关掉
-  后它的 entry 可能已经不在树里了。
+比对的是 manifest 的依赖键，本身就是包名，不需要再从 loader entry id 反查模块名。
 
 ### 升级怎么排除
 
 DSH 的升级 = 先删包再装同一个包，两步都跑 npm，间隔是秒到分钟级。所以：
 
-- 删除一旦确认，**立刻写盘**——删除之后往往紧跟着重启，只留在内存里的记录会丢；
+- 比对发现删除，**立刻写盘**——删除之后往往紧跟着重启，只留在内存里的记录会丢；
 - 同时把它记成「可回撤」的，窗口 10 分钟；
 - 窗口内紧接着的重装如果版本**不同** → 判定为升级，把刚写的那条删除记录**回撤**掉，
   重装本身也不写；
@@ -198,10 +197,10 @@ DSH 的升级 = 先删包再装同一个包，两步都跑 npm，间隔是秒到
 
 ### 启停怎么判定
 
-`reason: 'bundle'` 也会被版本豁免复用（豁免只改兼容性文件，不改任何开关状态）。
-所以判定不靠事件措辞、而靠**状态比对**：操作前后各读一次「这个包 / 这个 entry 现在
-是开是关」（包看 profile manifest 的 `dsh.profile.bundles`，entry 看 loader 的
-`disabled`），前后一样就说明这次事件没有真的切换 → 不记。
+只看包在不在 `dsh.profile.bundles` 里，和上次记下的对比：新进入数组 = 启用，离开 =
+禁用。因为比的是**最终状态**而不是某个事件的措辞，那些只改兼容性、不改开关的操作
+（版本豁免）自然就不会留下记录。这也是原来那套「操作前后各读一次」的判定的替代 ——
+现在没有事件可读了，状态差本身就是判定。
 
 ### 展示窗口
 
@@ -222,7 +221,11 @@ DSH 的升级 = 先删包再装同一个包，两步都跑 npm，间隔是秒到
 
 ```json
 {
-  "version": 1,
+  "version": 2,
+  "known": {
+    "packages": { "dsh-docker": "0.16.1" },
+    "enabled": ["dsh-docker"]
+  },
   "events": [
     { "action": "install", "name": "dsh-docker", "version": "0.16.1", "time": "2026-11-09T02:19:28.000Z" },
     { "action": "disable", "name": "dsh-docker", "version": null, "time": "2026-11-09T02:20:11.000Z", "baseline": true }
@@ -230,7 +233,10 @@ DSH 的升级 = 先删包再装同一个包，两步都跑 npm，间隔是秒到
 }
 ```
 
-上限 2000 条（超出丢最旧的）—— 这是日志，不是数据库。
+- `known`：上次比对时的 profile 状态，是下一次比对的对象。
+- `events`：展示用的记录，上限 2000 条（超出丢最旧的）—— 这是日志，不是数据库。
+- `version: 1` 的老文件没有 `known`：读到就**静默收养**当前状态当基线，不补记任何记录，
+  同时升到 2。所以升级本插件本身不会在记录里凭空多出一堆安装。
 
 ## 8. 兼容性风险
 
@@ -280,9 +286,12 @@ DSH 的升级 = 先删包再装同一个包，两步都跑 npm，间隔是秒到
     `plugin-history.json` 存在且 `baseline` 为 true。
 29. 在插件面板里装一个插件 → 「安装/删除」标签出现一条带插件名与时间的记录。
 30. 卸载一个插件 → 同标签出现一条「删除」记录。
-31. 启用 / 禁用一个插件（或插件包）→ 「启用/禁用」标签出现对应记录，插件名可读。
-32. 升级一个插件 → 两个标签都不出现它的记录（升级既不算删除也不算安装）。
-33. 把系统时间往前拨一个月以上（或造一条旧记录）→ 旧的启停记录不再显示，安装/删除仍全量在。
+31. **在插件市场里**装 / 删一个插件（不经过设置里的插件页）→ 同样出现记录。这条是这套
+    设计的存在理由：市场是 shell 出去调 CLI 的，不会往运行中的应用发事件。
+32. 启用 / 禁用一个插件包 → 「启用/禁用」标签出现对应记录。
+33. 升级一个插件 → 两个标签都不出现它的记录（升级既不算删除也不算安装）。
+34. 把系统时间往前拨一个月以上（或造一条旧记录）→ 旧的启停记录不再显示，安装/删除仍全量在。
+35. 从 v1 日志升级上来：打开窗口不凭空多出一堆记录，文件 `version` 变成 2 并出现 `known`。
 
 ## 10. 后续可能的扩展（都没做）
 

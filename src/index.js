@@ -16,7 +16,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { createRecorder } from './history.js'
+import { createRecorder, SYNC_INTERVAL_MS } from './history.js'
 
 /** Typert service key; also its namespace (client mounts against it). */
 const SERVICE_KEY = 'spcClicks'
@@ -95,8 +95,10 @@ export function apply(ctx) {
   })
   ctx.provide(SERVICE_KEY, clicks)
 
-  // The plugin activity log: the plugin manager reports every install,
-  // removal and enable/disable as a `plugin-manager/operation` event.
+  // The plugin activity log. Plugin changes are detected by comparing the
+  // profile with what was recorded last time, on a timer and whenever the
+  // window asks: installs and removals also happen from the plugin market and
+  // the CLI, outside this app, and those paths announce nothing.
   const recorder = createRecorder(ctx)
   const history = remoteService(HISTORY_SERVICE_KEY, HISTORY_NAMESPACE, ['list'], {
     list() {
@@ -105,13 +107,21 @@ export function apply(ctx) {
   })
   ctx.provide(HISTORY_SERVICE_KEY, history)
 
-  if (typeof ctx.on === 'function') {
-    ctx.on('plugin-manager/operation', async (operation) => {
-      try {
-        await recorder.handle(operation)
-      } catch {
-        // A broken log must never break plugin management.
-      }
+  // Polling keeps the two halves of an upgrade apart: the removal is seen and
+  // recorded, then the reinstall with another version retracts it. An interval
+  // coarse enough to miss both halves is harmless — the upgrade leaves no
+  // record either way.
+  if (typeof ctx.effect === 'function') {
+    ctx.effect(() => {
+      const timer = setInterval(() => {
+        try {
+          recorder.sync()
+        } catch {
+          // A broken log must never break the app.
+        }
+      }, SYNC_INTERVAL_MS)
+      if (typeof timer.unref === 'function') timer.unref()
+      return () => clearInterval(timer)
     })
   }
 }

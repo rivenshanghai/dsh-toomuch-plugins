@@ -732,17 +732,20 @@ assert.strictEqual(await svc.recordClick('market'), 1, 'recovers after corrupt f
 assert.deepStrictEqual(JSON.parse(fs.readFileSync(countsFile, 'utf8')), { market: 1 }, 'rewritten after corrupt file')
 
 // --- host half: the plugin activity log -----------------------------------
-// The host listens for `plugin-manager/operation` and keeps what was
-// installed, removed, enabled or disabled in plugin-history.json.
+// Nothing is recorded by listening for change events: a plugin can be added or
+// removed from the settings panel, from the plugin market or from the CLI, and
+// only some of those paths announce it. The profile manifest is the one thing
+// they all update, so the log is reconciled against it.
+const { createRecorder, historyFile: historyPath, SYNC_INTERVAL_MS } = await import('../src/history.js')
 const profileDir = path.join(tmpHome, 'profile')
 fs.mkdirSync(profileDir, { recursive: true })
 const manifest = (deps, bundles = []) =>
   fs.writeFileSync(path.join(profileDir, 'package.json'), JSON.stringify({ dependencies: deps, dsh: { profile: { bundles } } }))
 manifest({ 'dsh-old': '1.0.0' })
-const listeners = {}
+const disposers = []
 const hostCtx = {
   provide: (name, value) => { provided[name] = value },
-  on: (name, fn) => { listeners[name] = fn },
+  effect: (callback) => { const dispose = callback(); disposers.push(dispose); return dispose },
   get: (name) => (name === 'profileContext' ? { dir: profileDir } : undefined),
 }
 host.apply(hostCtx)
@@ -755,118 +758,87 @@ assert.deepStrictEqual(
 )
 const historyMarker = Object.getPrototypeOf(historySvc)['@deepseek-ai/dsh-typert-protocol/remote-methods']
 assert.deepStrictEqual(historyMarker.methods.map((m) => m.method), ['list'], 'history remote method')
-assert.ok(listeners['plugin-manager/operation'], 'host listens for plugin-manager/operation')
+assert.strictEqual(disposers.length, 1, 'the host half polls the profile')
+assert.ok(SYNC_INTERVAL_MS > 0, 'the poll interval is a real interval')
+// The tests drive the comparison themselves; a live timer would race them.
+for (const dispose of disposers) if (typeof dispose === 'function') dispose()
 
-const { createRecorder, historyFile: historyPath } = await import('../src/history.js')
-// How long a removal stays retractable as the start of a two-step upgrade.
 const UPGRADE_WINDOW = 60_000
-const recorder = createRecorder(hostCtx, { removeGraceMs: UPGRADE_WINDOW })
-const op = (fields) => recorder.handle({ id: 'op-1', phase: 'settled', application: 'applied', time: '2026-11-01T00:00:00.000Z', ...fields })
+let nowMs = Date.parse('2026-11-01T00:00:00.000Z')
+const recorder = createRecorder(hostCtx, { removeGraceMs: UPGRADE_WINDOW, now: () => nowMs })
+// Change the profile the way any writer does, then move the clock on.
+const profile = (deps, bundles = []) => {
+  manifest(deps, bundles)
+  nowMs += 1000
+}
+const actions = (log, name) => log.installRemove.filter((e) => e.name === name).map((e) => e.action)
+const onDisk = () => JSON.parse(fs.readFileSync(historyPath(), 'utf8'))
 
-// An install of a package the profile did not have.
-manifest({ 'dsh-old': '1.0.0', 'dsh-new': '2.0.0' })
-await op({ reason: 'install', stage: 'install', target: 'dsh-new' })
+// The first comparison adopts the profile: its packages predate the log.
 let log = recorder.list()
-assert.deepStrictEqual(
-  log.installRemove.map((e) => [e.action, e.name, e.version]),
-  [['install', 'dsh-new', '2.0.0']],
-  'install recorded',
-)
+assert.deepStrictEqual(log.installRemove, [], 'the first comparison records nothing')
 
-// A removal of a package that is not installed any more.
-manifest({ 'dsh-old': '1.0.0' })
-await op({ reason: 'remove', stage: 'remove', target: 'dsh-new', version: '2.0.0' })
+// An install, whoever performed it.
+profile({ 'dsh-old': '1.0.0', 'dsh-new': '2.0.0' })
 log = recorder.list()
-assert.deepStrictEqual(
-  log.installRemove.map((e) => [e.action, e.name]),
-  [['remove', 'dsh-new'], ['install', 'dsh-new']],
-  'removal recorded, newest first',
-)
+assert.deepStrictEqual(actions(log, 'dsh-new'), ['install'], 'an install is recorded')
 
-// An upgrade is a removal followed by an installation of a newer version:
-// neither of the two is shown.
-manifest({ 'dsh-old': '1.0.0', 'dsh-up': '1.0.0' })
-await op({ reason: 'install', stage: 'install', target: 'dsh-up' })
-await op({ reason: 'remove', stage: 'remove', target: 'dsh-up', version: '1.0.0' })
-manifest({ 'dsh-old': '1.0.0', 'dsh-up': '2.0.0' })
-await op({ reason: 'install', stage: 'install', target: 'dsh-up' })
+// A removal.
+profile({ 'dsh-old': '1.0.0' })
 log = recorder.list()
-assert.deepStrictEqual(
-  log.installRemove.filter((e) => e.name === 'dsh-up').map((e) => e.action),
-  ['install'],
-  'the upgrade itself is not shown, the first install stays',
-)
+assert.deepStrictEqual(actions(log, 'dsh-new'), ['remove', 'install'], 'a removal is recorded, newest first')
 
-// Enabling and disabling a plugin is recorded with its name.
-await op({ reason: 'plugin', stage: 'enable', target: 'dsh-mcp', enabled: false })
-log = recorder.list()
-assert.deepStrictEqual(
-  log.enableDisable.map((e) => [e.action, e.name]),
-  [['disable', 'dsh-mcp']],
-  'plugin toggle recorded',
-)
-
-// A bundle toggle is recorded when it really changes the selection.
-manifest({ 'dsh-old': '1.0.0' }, ['dsh-docker'])
-await recorder.handle({ id: 'op-3', reason: 'bundle', stage: 'enable', target: 'dsh-docker', enabled: false, phase: 'started', application: 'applied', time: '2026-11-01T00:00:00.000Z' })
-manifest({ 'dsh-old': '1.0.0' }, [])
-await recorder.handle({ id: 'op-3', reason: 'bundle', stage: 'enable', target: 'dsh-docker', enabled: false, phase: 'settled', application: 'applied', time: '2026-11-01T00:00:00.000Z' })
-log = recorder.list()
+// It is on disk as soon as it is noticed, and a restarted host still has it.
 assert.ok(
-  log.enableDisable.some((e) => e.action === 'disable' && e.name === 'dsh-docker'),
-  'bundle toggle recorded',
+  onDisk().events.some((e) => e.action === 'remove' && e.name === 'dsh-new'),
+  'the removal is written at once',
 )
+const afterRestart = createRecorder(hostCtx, { removeGraceMs: UPGRADE_WINDOW, now: () => nowMs })
+assert.deepStrictEqual(actions(afterRestart.list(), 'dsh-new'), ['remove', 'install'], 'a restarted host keeps it')
 
-// A version exemption is reported as a bundle change but switches nothing:
-// it is not a plugin toggle.
-await recorder.handle({ id: 'op-4', reason: 'bundle', stage: 'enable', target: 'dsh-docker', enabled: true, phase: 'started', application: 'applied', time: '2026-11-01T00:00:00.000Z' })
-await recorder.handle({ id: 'op-4', reason: 'bundle', stage: 'enable', target: 'dsh-docker', enabled: true, phase: 'settled', application: 'applied', time: '2026-11-01T00:00:00.000Z' })
+// An upgrade: the package disappears and comes back with another version.
+profile({ 'dsh-old': '1.0.0', 'dsh-up': '1.0.0' })
+recorder.list()
+profile({ 'dsh-old': '1.0.0' })
+recorder.list()
+profile({ 'dsh-old': '1.0.0', 'dsh-up': '2.0.0' })
 log = recorder.list()
-assert.strictEqual(
-  log.enableDisable.filter((e) => e.name === 'dsh-docker' && e.action === 'enable').length,
-  0,
-  'version exemptions are not toggles',
-)
+assert.deepStrictEqual(actions(log, 'dsh-up'), ['install'], 'the upgrade leaves no record, the first install stays')
 
-// Enable/disable records older than a month are not shown; installs are.
-const old = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString()
-await recorder.handle({ id: 'op-2', reason: 'plugin', stage: 'enable', target: 'dsh-mcp', enabled: true, phase: 'settled', application: 'applied', time: old })
+// A reinstall of the same version is a real removal and a real install.
+profile({ 'dsh-old': '1.0.0', 'dsh-again': '1.0.0' })
+recorder.list()
+profile({ 'dsh-old': '1.0.0' })
+recorder.list()
+profile({ 'dsh-old': '1.0.0', 'dsh-again': '1.0.0' })
 log = recorder.list()
-assert.ok(!log.enableDisable.some((e) => e.name === 'dsh-mcp' && e.time === old), 'old toggles are hidden')
-assert.strictEqual(log.installRemove.length, 3, 'installs and removals are all kept')
+assert.deepStrictEqual(actions(log, 'dsh-again'), ['install', 'remove', 'install'], 'a reinstall keeps both records')
 
-// A removal reaches the disk as it settles, not when the window is opened:
-// a removal is usually followed by a restart, and a record held in memory
-// would be lost before anyone reads it.
-manifest({ 'dsh-old': '1.0.0', 'dsh-gone': '3.0.0' })
-await op({ reason: 'install', stage: 'install', target: 'dsh-gone' })
-manifest({ 'dsh-old': '1.0.0' })
-await op({ reason: 'remove', stage: 'remove', target: 'dsh-gone', version: '3.0.0' })
-const onDisk = () => JSON.parse(fs.readFileSync(historyPath(), 'utf8')).events
-assert.ok(
-  onDisk().some((e) => e.action === 'remove' && e.name === 'dsh-gone'),
-  'the removal is written before the window is opened',
-)
-const afterRestart = createRecorder(hostCtx, { removeGraceMs: UPGRADE_WINDOW })
-assert.ok(
-  afterRestart.list().installRemove.some((e) => e.action === 'remove' && e.name === 'dsh-gone'),
-  'a restarted host still shows the removal',
-)
-
-
-// The log is returned newest first, by time.
-manifest({ 'dsh-old': '1.0.0', 'dsh-late': '1.0.0' })
-await recorder.handle({ id: 'op-5', reason: 'install', stage: 'install', target: 'dsh-late', phase: 'settled', application: 'applied', time: '2026-12-01T00:00:00.000Z' })
+// A bundle switched off and back on.
+profile({ 'dsh-old': '1.0.0', 'dsh-again': '1.0.0', 'dsh-b': '1.0.0' }, ['dsh-again', 'dsh-b'])
+recorder.list()
+profile({ 'dsh-old': '1.0.0', 'dsh-again': '1.0.0', 'dsh-b': '1.0.0' }, ['dsh-again'])
 log = recorder.list()
+assert.ok(log.enableDisable.some((e) => e.name === 'dsh-b' && e.action === 'disable'), 'a switch off is recorded')
+profile({ 'dsh-old': '1.0.0', 'dsh-again': '1.0.0', 'dsh-b': '1.0.0' }, ['dsh-again', 'dsh-b'])
+log = recorder.list()
+assert.ok(log.enableDisable.some((e) => e.name === 'dsh-b' && e.action === 'enable'), 'a switch on is recorded')
+
+// Switches older than a month are hidden; installs are all kept.
+const storedDoc = onDisk()
+storedDoc.events.push({ action: 'enable', name: 'dsh-stale', version: null, time: '2026-01-01T00:00:00.000Z' })
+fs.writeFileSync(historyPath(), JSON.stringify(storedDoc))
+log = recorder.list()
+assert.ok(!log.enableDisable.some((e) => e.name === 'dsh-stale'), 'old switches are hidden')
+assert.ok(log.installRemove.length > 0, 'installs are all kept')
+
+// Newest first, by time.
 const times = log.installRemove.map((e) => e.time)
 assert.deepStrictEqual(times, [...times].sort((a, b) => Date.parse(b) - Date.parse(a)), 'installs are newest first')
-assert.strictEqual(log.installRemove[0].name, 'dsh-late', 'the newest record is first')
 
-// The log itself is a plain file next to the plugin's other state.
-const historyFile = path.join(tmpHome, 'plugins', 'dsh-toomuch-plugins', 'plugin-history.json')
-const stored = JSON.parse(fs.readFileSync(historyFile, 'utf8'))
-assert.strictEqual(stored.version, 1, 'history file version')
-assert.ok(Array.isArray(stored.events) && stored.events.length > 0, 'history file holds the events')
+// The log is a plain file that also remembers the state it recorded.
+assert.strictEqual(onDisk().version, 2, 'history file version')
+assert.ok(onDisk().known !== null && typeof onDisk().known.packages === 'object', 'the file remembers the profile')
 
 // --- first run: the profile is scanned once --------------------------------
 // With no log yet, the profile is scanned once and the plugins it already

@@ -65,15 +65,14 @@ entries**, and bring it back when you need it.
   `~/.dsh/plugins/dsh-toomuch-plugins/click-counts.json`, (silently skipped when the remote is unavailable).
 - **Plugin activity log** — an icon right of the "collapse / expand global panels" toggle opens a
   window with two tabs: **Install / remove** (every record) and **Enable / disable** (the last
-  month). The host half listens for DSH's `plugin-manager/operation` events and writes what was
-  installed, removed, enabled or disabled — with the plugin name and the time — to
-  `~/.dsh/plugins/dsh-toomuch-plugins/plugin-history.json`. **Upgrades are left out**: DSH performs
-  one as a removal followed by an installation of the same package, so a removal followed by an
-  installation of a *different* version is recognised as an upgrade and both records are dropped. A
-  version exemption changes a bundle without switching anything, so a toggle only counts when the
-  enablement state really changed. Each row shows the action as a 14px stroke icon on its state
-  colour (down-arrow for install, up-arrow for remove, power-on for enable, power-off for disable)
-  rather than text, and both tabs are returned newest first.
+  month), written to `~/.dsh/plugins/dsh-toomuch-plugins/plugin-history.json`. Records are built
+  by comparing the profile manifest with the state the log recorded last time, not by listening for
+  change events: plugins are installed and removed from the settings panel, from the plugin market
+  and from the `dsh` CLI, and only the first of those announces what it did. **Upgrades are left
+  out**: DSH upgrades by removing the package and installing it again, so a package that reappears
+  with another version retracts the removal it started with. Each row shows the action as a 14px
+  stroke icon on its state colour (down-arrow for install, up-arrow for remove, power-on for
+  enable, power-off for disable) rather than text, and both tabs are returned newest first.
 - **First-run scan** — the first time the plugin runs in a profile it has no history yet, so it
   scans the profile once and records the plugins that were already there (and whether they are
   enabled) as the starting point. Those rows carry the scan time with an 「initial」 marker, so
@@ -158,13 +157,11 @@ Requirements: DSH (DeepSeek Harness) with a `web` profile; Node.js ≥ 20.
 The host half (`src/index.js`) provides two services:
 
 - `spcClicks` — the click counts described above;
-- `spcHistory` — the plugin activity log. `src/history.js` listens for
-  `plugin-manager/operation` (the event DSH's plugin manager emits for every
-  install, removal, enable/disable toggle and version exemption) and records
-  what a person cares about: the plugin name, the time and the action. It
-  recognises an upgrade by the version that disappears and comes back, and it
-  only counts a toggle when the enablement state really changed. The log lives
-  in `plugin-history.json` next to `click-counts.json`.
+- `spcHistory` — the plugin activity log. `src/history.js` compares the profile
+  manifest with the state it recorded last time and writes the differences down:
+  the plugin name, the time and the action. It recognises an upgrade by the
+  version that disappears and comes back, so an upgrade leaves no record. The
+  log lives in `plugin-history.json` next to `click-counts.json`.
 
 The basis is DSH's own `@deepseek-ai/dsh-client-ui-sidebar`: `nav.panelList` is a
 direct child of the sidebar root, so walking up from the footer button always

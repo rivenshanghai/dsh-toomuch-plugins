@@ -1,32 +1,30 @@
 /**
- * Plugin activity history — the host half's recorder.
+ * Plugin activity log (host half).
  *
- * DSH reports every plugin-management operation as a `plugin-manager/operation`
- * event (the plugin manager emits it for installs, removals, enable/disable
- * toggles and version exemptions). This module listens to those events and
- * keeps a small local log of the ones a person cares about:
+ * The log answers one question: which plugins were installed, removed, enabled
+ * or disabled, and when. It is built by comparing the profile's current state
+ * with the state recorded last time, not by listening for change events: a
+ * plugin can be installed or removed from the settings panel, from the plugin
+ * market, from the `dsh` CLI, or by editing the profile manifest, and only some
+ * of those paths announce what they did. The profile manifest is the one place
+ * they all agree on, so it is the source of truth here.
  *
- *   install / remove  — a plugin package was added to or taken off the profile
- *   enable / disable  — a plugin (or a plugin bundle) was switched on or off
+ * Comparing states cannot tell an upgrade from a re-install, because DSH
+ * upgrades by removing the package and installing it again. That shows up as
+ * "present, gone, present with another version", so a removal stays retractable
+ * for a while and a re-appearing package with a different version retracts it:
+ * the upgrade leaves no record at all, which is the intent.
  *
- * Upgrades are deliberately left out: the plugin manager performs an upgrade
- * as a removal followed by an installation of the same package, so an upgrade
- * would otherwise show up as "removed" + "installed". A removal that is
- * followed by an installation of a *different* version is that upgrade and is
- * dropped; a removal that is followed by the very same version is a real
- * re-install and stays.
- *
- * The log lives next to the plugin's other state file:
- * `<DSH_HOME>/plugins/dsh-toomuch-plugins/plugin-history.json`
+ * State lives in `~/.dsh/plugins/dsh-toomuch-plugins/plugin-history.json` as
+ * `{ version, known, events }`. Details: docs/design.md.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 /**
  * How long a written removal stays retractable as the start of a two-step
- * upgrade: DSH upgrades by removing the package and installing it again, and
- * both steps run npm, so the gap is seconds to minutes.
+ * upgrade. Both halves run npm, so the gap is seconds to minutes.
  * ponytail: an upgrade slower than this leaves the removal in the log.
  */
 const REMOVE_GRACE_MS = 10 * 60 * 1000
@@ -34,122 +32,90 @@ const REMOVE_GRACE_MS = 10 * 60 * 1000
 const TOGGLE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 /** Cap on the stored log — ponytail: this is a log, not a database. */
 const MAX_EVENTS = 2000
+/** How often the host half re-reads the profile (see `sync`). */
+export const SYNC_INTERVAL_MS = 5000
 
-/** Where the history is kept. */
+const ACTIONS = new Set(['install', 'remove', 'enable', 'disable'])
+
+/**
+ * Where the log lives. Kept beside the plugin's other state, not inside the
+ * profile, so it survives a reinstall of the plugin itself.
+ * @returns Absolute path of the log file.
+ */
 export function historyFile() {
   const home = (process.env.DSH_HOME || '').trim() || join(homedir(), '.dsh')
   return join(home, 'plugins', 'dsh-toomuch-plugins', 'plugin-history.json')
 }
 
-/** One record as it is stored. */
+/** Whether a parsed record is one this module wrote. */
 function isEvent(value) {
-  if (value === null || typeof value !== 'object') return false
-  if (typeof value.name !== 'string' || value.name === '') return false
-  return value.action === 'install' || value.action === 'remove' || value.action === 'enable' || value.action === 'disable'
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof value.name === 'string' &&
+    value.name !== '' &&
+    ACTIONS.has(value.action) &&
+    typeof value.time === 'string'
+  )
 }
 
-/** Read the stored log; a missing or corrupt file starts an empty log. */
-function readLog(file) {
+/**
+ * Read the stored document. A missing or corrupt file reads as an empty one.
+ * @param file Log path.
+ * @returns `{ events, known }`; `known` is null when the file predates it.
+ */
+function readDoc(file) {
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8'))
     if (parsed !== null && typeof parsed === 'object' && Array.isArray(parsed.events)) {
-      return parsed.events.filter(isEvent)
+      const known = parsed.known
+      const usable =
+        known !== null &&
+        typeof known === 'object' &&
+        known.packages !== null &&
+        typeof known.packages === 'object' &&
+        Array.isArray(known.enabled)
+      return { events: parsed.events.filter(isEvent), known: usable ? known : null }
     }
   } catch {
     // Missing or corrupt file: start from scratch.
   }
-  return []
+  return { events: [], known: null }
 }
 
-/** Write the log back, keeping only the newest records. */
-function writeLog(file, events) {
+/** Write the document back, keeping only the newest records. */
+function writeDoc(file, doc) {
   mkdirSync(dirname(file), { recursive: true })
-  writeFileSync(file, JSON.stringify({ version: 1, events: events.slice(-MAX_EVENTS) }, null, 2) + '\n')
-}
-
-/** The profile's installed packages and their versions. */
-function profileDependencies(ctx) {
-  try {
-    const profile = ctx.get('profileContext')
-    if (profile === undefined || profile === null || typeof profile.dir !== 'string') return {}
-    const manifest = JSON.parse(readFileSync(join(profile.dir, 'package.json'), 'utf8'))
-    const dependencies = manifest.dependencies
-    if (dependencies === null || typeof dependencies !== 'object') return {}
-    return dependencies
-  } catch {
-    // No profile or an unreadable manifest: nothing is known to be installed.
-    return {}
-  }
+  const events = doc.events.slice(-MAX_EVENTS)
+  const body = JSON.stringify({ version: 2, known: doc.known, events }, null, 2) + '\n'
+  // Rename over the old file: a crash mid-write then leaves the previous log
+  // intact instead of truncating the history.
+  const temporary = `${file}.tmp`
+  writeFileSync(temporary, body)
+  renameSync(temporary, file)
 }
 
 /**
- * The plugin behind a loader entry id. The inventory is the cheap source; the
- * plugin manager is the fallback for a profile without the inventory service.
+ * The profile manifest, read once per comparison.
  * @param ctx Plugin context.
- * @param entryId Loader entry id of the plugin.
- * @returns The module name, or the entry id when it cannot be resolved.
+ * @returns `{ packages, enabled }`; both empty when the profile is unreadable.
  */
-async function pluginName(ctx, entryId) {
+function profileState(ctx) {
   try {
-    const inventory = ctx.get('pluginInventory')
-    if (inventory !== undefined && inventory !== null && typeof inventory.list === 'function') {
-      const snapshot = await inventory.list()
-      const entries = snapshot !== null && typeof snapshot === 'object' && Array.isArray(snapshot.entries) ? snapshot.entries : []
-      const hit = entries.find((entry) => entry.entryId === entryId)
-      if (hit !== undefined && typeof hit.moduleName === 'string' && hit.moduleName !== '') return hit.moduleName
+    const profile = ctx.get('profileContext')
+    if (profile === undefined || profile === null || typeof profile.dir !== 'string') {
+      return { packages: {}, enabled: [] }
+    }
+    const manifest = JSON.parse(readFileSync(join(profile.dir, 'package.json'), 'utf8'))
+    const dependencies = manifest?.dependencies
+    const bundles = manifest?.dsh?.profile?.bundles
+    return {
+      packages: dependencies !== null && typeof dependencies === 'object' ? dependencies : {},
+      enabled: Array.isArray(bundles) ? bundles : [],
     }
   } catch {
-    // The inventory is optional.
-  }
-  try {
-    const manager = ctx.get('pluginManager')
-    if (manager !== undefined && manager !== null && typeof manager.listPlugins === 'function') {
-      const rows = await manager.listPlugins()
-      const hit = Array.isArray(rows) ? rows.find((row) => row.entryId === entryId) : undefined
-      if (hit !== undefined && typeof hit.moduleName === 'string' && hit.moduleName !== '') return hit.moduleName
-    }
-  } catch {
-    // The plugin manager is optional.
-  }
-  return entryId
-}
-
-/**
- * The bundles the profile selected (the plugin manager writes the selection
- * into the profile manifest).
- * @param ctx Plugin context.
- * @returns The selected bundle names.
- */
-function selectedBundles(ctx) {
-  try {
-    const profile = ctx.get('profileContext')
-    if (profile === undefined || profile === null || typeof profile.dir !== 'string') return []
-    const manifest = JSON.parse(readFileSync(join(profile.dir, 'package.json'), 'utf8'))
-    const bundles = manifest === null || typeof manifest !== 'object' ? undefined : manifest.dsh?.profile?.bundles
-    return Array.isArray(bundles) ? bundles : []
-  } catch {
-    return []
-  }
-}
-
-/**
- * Whether the profile selects the bundle. The plugin manager writes the
- * selection into the profile manifest, so this is the state a bundle toggle
- * changes.
- * @param ctx Plugin context.
- * @param name Bundle package name.
- * @returns True/False, or null when the state cannot be read.
- */
-function bundleSelected(ctx, name) {
-  try {
-    const profile = ctx.get('profileContext')
-    if (profile === undefined || profile === null || typeof profile.dir !== 'string') return null
-    const manifest = JSON.parse(readFileSync(join(profile.dir, 'package.json'), 'utf8'))
-    const bundles = manifest === null || typeof manifest !== 'object' ? undefined : manifest.dsh?.profile?.bundles
-    if (!Array.isArray(bundles)) return null
-    return bundles.includes(name)
-  } catch {
-    return null
+    // No profile or an unreadable manifest: nothing is known about it.
+    return { packages: {}, enabled: [] }
   }
 }
 
@@ -168,9 +134,10 @@ function profileBundles(ctx) {
     profile = null
   }
   if (profile === undefined || profile === null || typeof profile.dir !== 'string') return []
-  const selected = new Set(selectedBundles(ctx))
+  const { packages, enabled } = profileState(ctx)
+  const selected = new Set(enabled)
   const bundles = []
-  for (const [name, version] of Object.entries(profileDependencies(ctx))) {
+  for (const [name, version] of Object.entries(packages)) {
     let manifest = null
     try {
       manifest = JSON.parse(readFileSync(join(profile.dir, 'node_modules', name, 'package.json'), 'utf8'))
@@ -184,81 +151,38 @@ function profileBundles(ctx) {
 }
 
 /**
- * Whether the loader entry is switched off. The plugin manager switches a
- * plugin off by disabling its loader entry, so this is the state a plugin
- * toggle changes.
- * @param ctx Plugin context.
- * @param entryId Loader entry id of the plugin.
- * @returns True/False, or null when the state cannot be read.
- */
-function entryDisabled(ctx, entryId) {
-  try {
-    const loader = ctx.get('loader')
-    if (loader === undefined || loader === null || typeof loader.entries !== 'function') return null
-    for (const entry of loader.entries()) {
-      if (entry.id === entryId) return entry.disabled === true
-    }
-    return null
-  } catch {
-    return null
-  }
-}
-
-/**
- * Build the recorder: it owns the log, the packages known to be installed and
- * the removals that may still turn out to be an upgrade.
+ * Build the recorder: it owns the log and the last state it recorded.
  * @param ctx Plugin context (host half).
- * @param options `removeGraceMs` overrides the removal grace (tests).
- * @returns The recorder with `handle(operation)` and `list()`.
+ * @param options `now` overrides the clock, `removeGraceMs` the upgrade window
+ *   (both are for tests).
+ * @returns The recorder with `sync()` and `list()`.
  */
 export function createRecorder(ctx, options = {}) {
   const file = historyFile()
   const graceMs = Number.isFinite(options.removeGraceMs) ? options.removeGraceMs : REMOVE_GRACE_MS
-  /** Package name -> version currently on disk. */
-  const installed = new Map()
+  const clock = typeof options.now === 'function' ? options.now : () => Date.now()
   /** Package name -> the removal just written, which an upgrade must retract. */
   const recent = new Map()
-  /** Package names whose installation is running right now. */
-  const installing = new Set()
-  /** Operation id -> plugin name, resolved while the entry was still loaded. */
-  const resolved = new Map()
-  /** Operation id -> enablement state before the operation. */
-  const states = new Map()
-
-  // The packages the profile already had are not new installs.
-  for (const [name, version] of Object.entries(profileDependencies(ctx))) installed.set(name, version)
 
   // The first run: there is no history yet, so scan the profile once and
   // record the plugins it already had as the starting point. The scan cannot
   // know when they were installed, so these records are marked as a baseline.
   if (!existsSync(file)) {
-    const at = new Date().toISOString()
+    const at = new Date(clock()).toISOString()
     const events = []
     for (const bundle of profileBundles(ctx)) {
       events.push({ action: 'install', name: bundle.name, version: bundle.version, time: at, baseline: true })
       events.push({ action: bundle.enabled ? 'enable' : 'disable', name: bundle.name, version: null, time: at, baseline: true })
     }
     try {
-      writeLog(file, events)
+      writeDoc(file, { events, known: null })
     } catch {
       // No writable log: the window simply stays empty.
     }
   }
 
-  /** Append one record to the log; a disk failure drops the record only. */
-  function append(event) {
-    const events = readLog(file)
-    events.push(event)
-    try {
-      writeLog(file, events)
-    } catch {
-      // Disk unavailable: this record is dropped, the next one still lands.
-    }
-  }
-
   /** Drop one record again: an upgrade retracts the removal it started with. */
-  function retract(event) {
-    const events = readLog(file)
+  function retract(events, event) {
     for (let index = events.length - 1; index >= 0; index -= 1) {
       const candidate = events[index]
       if (
@@ -268,14 +192,10 @@ export function createRecorder(ctx, options = {}) {
         candidate.version === event.version
       ) {
         events.splice(index, 1)
-        try {
-          writeLog(file, events)
-        } catch {
-          // Disk unavailable: the record stays, nothing worse happens.
-        }
-        return
+        return true
       }
     }
+    return false
   }
 
   /** Forget removals too old to be the start of a two-step upgrade. */
@@ -285,118 +205,85 @@ export function createRecorder(ctx, options = {}) {
     }
   }
 
-  /** An operation that really changed something. */
-  function applied(operation) {
-    return operation.application !== 'failed' && operation.application !== 'cancelled'
-  }
+  /**
+   * Compare the profile with the state recorded last time and write down what
+   * changed. Safe to call at any time: with nothing changed it writes nothing.
+   * @returns The records added by this comparison.
+   */
+  function sync() {
+    const doc = readDoc(file)
+    const { packages, enabled } = profileState(ctx)
+    const selected = new Set(enabled)
+    const at = new Date(clock()).toISOString()
+    const now = clock()
+    const added = []
+    let changed = false
+    const record = (action, name, version) => added.push({ action, name, version, time: at })
 
-  /** The record's timestamp, falling back to now. */
-  function stamp(operation) {
-    return typeof operation.time === 'string' && operation.time !== '' ? operation.time : new Date().toISOString()
-  }
-
-  /** A package was installed. */
-  function onInstall(operation) {
-    const name = operation.target
-    if (typeof name !== 'string' || name === '') return
-    if (operation.phase !== 'settled') {
-      installing.add(name)
-      return
-    }
-    installing.delete(name)
-    if (!applied(operation)) return
-    const version = profileDependencies(ctx)[name] ?? null
-    const removal = recent.get(name)
-    if (removal !== undefined) {
-      recent.delete(name)
-      const upgraded =
-        removal.event.version !== null &&
-        version !== null &&
-        removal.event.version !== version
-      if (upgraded) {
-        // An upgrade: retract the removal, and leave the installation out.
-        retract(removal.event)
-        installed.set(name, version)
-        return
+    const before = doc.known
+    if (before === null) {
+      // A log written before this field existed: adopt the current state as
+      // the baseline instead of reporting the whole profile as new.
+      doc.known = { packages, enabled }
+      try {
+        writeDoc(file, doc)
+      } catch {
+        // Disk unavailable: the next comparison adopts it again.
       }
-      // A real re-install: the removal stays, the installation follows it.
-      installed.set(name, version)
-      append({ action: 'install', name, version, time: stamp(operation) })
-      return
+      return []
     }
-    if (installed.has(name)) {
-      // Already on disk and no removal in between: an upgrade, not shown.
-      installed.set(name, version)
-      return
-    }
-    installed.set(name, version)
-    append({ action: 'install', name, version, time: stamp(operation) })
-  }
 
-  /** A package was removed. */
-  function onRemove(operation) {
-    const name = operation.target
-    if (typeof name !== 'string' || name === '') return
-    if (operation.phase !== 'settled') return
-    if (!applied(operation)) return
-    const version = typeof operation.version === 'string' ? operation.version : (installed.get(name) ?? null)
-    installed.delete(name)
-    // Written at once: a removal is usually followed by a restart, and a
-    // record kept only in memory would be lost before anyone reads the log.
-    const event = { action: 'remove', name, version, time: stamp(operation) }
-    append(event)
-    // Held as retractable, not withheld: an upgrade removes the package and
-    // installs it again, and that second step retracts this record.
-    recent.set(name, { at: Date.now(), event })
-  }
-
-  /** A plugin or a plugin bundle was switched on or off. */
-  async function onToggle(operation) {
-    if (operation.phase !== 'settled') {
-      // Read the state before the change: afterwards the entry may be gone.
-      if (operation.reason === 'plugin' && typeof operation.target === 'string') {
-        resolved.set(operation.id, await pluginName(ctx, operation.target))
-        states.set(operation.id, entryDisabled(ctx, operation.target))
-        return
+    prune(now)
+    // Appearances and switches.
+    for (const [name, version] of Object.entries(packages)) {
+      const wasInstalled = Object.hasOwn(before.packages, name)
+      if (!wasInstalled) {
+        const removal = recent.get(name)
+        const upgraded =
+          removal !== undefined &&
+          typeof version === 'string' &&
+          typeof removal.event.version === 'string' &&
+          removal.event.version !== version
+        if (upgraded) {
+          // An upgrade: retract the removal and leave the installation out.
+          recent.delete(name)
+          if (retract(doc.events, removal.event)) changed = true
+        } else {
+          if (removal !== undefined) recent.delete(name)
+          record('install', name, typeof version === 'string' ? version : null)
+          if (selected.has(name)) record('enable', name, null)
+        }
+      } else if (before.enabled.includes(name) !== selected.has(name)) {
+        record(selected.has(name) ? 'enable' : 'disable', name, null)
       }
-      if (operation.reason === 'bundle' && typeof operation.target === 'string') {
-        states.set(operation.id, bundleSelected(ctx, operation.target))
-      }
-      return
     }
-    if (!applied(operation)) return
-    let name
-    let before
-    if (operation.reason === 'plugin') {
-      name = resolved.get(operation.id)
-      if (typeof name !== 'string' || name === '') name = await pluginName(ctx, operation.target)
-      before = states.get(operation.id)
-    } else {
-      name = operation.target
-      before = states.get(operation.id)
+    // Disappearances.
+    for (const name of Object.keys(before.packages)) {
+      if (Object.hasOwn(packages, name)) continue
+      const version = typeof before.packages[name] === 'string' ? before.packages[name] : null
+      const event = { action: 'remove', name, version, time: at }
+      added.push(event)
+      // Held as retractable, not withheld: an upgrade removes the package and
+      // installs it again, and that second step retracts this record.
+      recent.set(name, { at: now, event })
     }
-    // The operation is done: its scratch entries are not needed any more.
-    resolved.delete(operation.id)
-    states.delete(operation.id)
-    if (typeof name !== 'string' || name === '') return
-    // A version exemption is reported as a bundle change; it changes no
-    // enablement, so the state check below skips it.
-    if (operation.reason === 'bundle' && name.indexOf('@') > 0) return
-    // Only a real switch counts: the state before and after must differ.
-    const after = operation.reason === 'plugin' ? entryDisabled(ctx, operation.target) : bundleSelected(ctx, name)
-    if (before !== null && before !== undefined && after !== null && after !== undefined && before === after) return
-    const enabled = operation.enabled === true
-    append({ action: enabled ? 'enable' : 'disable', name, version: null, time: stamp(operation) })
-  }
 
-  /** Handle one plugin-manager operation. */
-  async function handle(operation) {
-    if (operation === null || typeof operation !== 'object') return
-    prune(Date.now())
-    const reason = operation.reason
-    if (reason === 'install') return onInstall(operation)
-    if (reason === 'remove') return onRemove(operation)
-    if (reason === 'plugin' || reason === 'bundle') return onToggle(operation)
+    // Nothing changed: leave the file alone rather than rewrite it on every
+    // poll. Only presence and selection are compared, so a version that moved
+    // without the package ever disappearing is an upgrade and stays unseen.
+    if (added.length > 0) {
+      doc.events = doc.events.concat(added)
+      changed = true
+    }
+    if (!changed) return []
+    doc.known = { packages, enabled }
+    try {
+      writeDoc(file, doc)
+    } catch {
+      // Disk unavailable: these records are dropped, the state is retried.
+      return []
+    }
+    return added
   }
 
   /**
@@ -404,11 +291,16 @@ export function createRecorder(ctx, options = {}) {
    * enable / disable records of the last month.
    */
   function list() {
-    const now = Date.now()
+    try {
+      sync()
+    } catch {
+      // A profile read failure must not hide the records already written.
+    }
+    const now = clock()
     const cutoff = now - TOGGLE_WINDOW_MS
     const installRemove = []
     const enableDisable = []
-    for (const event of readLog(file)) {
+    for (const event of readDoc(file).events) {
       if (event.action === 'install' || event.action === 'remove') installRemove.push(event)
       else if (Date.parse(event.time) >= cutoff) enableDisable.push(event)
     }
@@ -423,5 +315,5 @@ export function createRecorder(ctx, options = {}) {
     }
   }
 
-  return { handle, list }
+  return { sync, list }
 }
