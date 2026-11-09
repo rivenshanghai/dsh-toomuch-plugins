@@ -139,8 +139,9 @@ class 名可能被构建工具 hash 或改名，而「直接子元素 `<nav>`」
 
 | 文件 | 角色 |
 | --- | --- |
-| `src/index.js` | Host 半边。提供 `spcClicks` Typert 远程服务（手写 `typertRemote` 绑定 + 原型方法标记，走 gateway 的 src 描述符兜底），把客户端报来的面板点击累加进 `click-counts.json` |
-| `src/client.js` | Client 半边。全部逻辑在这里：`FooterToggle`（折叠 + 网格 + 顺序套用）、`DisplaySettingsTab`（设置页）、localStorage 读写与偏好广播、点击采集与 `$mount` 远程贡献 |
+| `src/index.js` | Host 半边。提供 `spcClicks` / `spcHistory` 两个 Typert 远程服务（手写 `typertRemote` 绑定 + 原型方法标记，走 gateway 的 src 描述符兜底），并把客户端报来的面板点击累加进 `click-counts.json` |
+| `src/history.js` | Host 半边。插件操作记录器：监听 `plugin-manager/operation`，写出 `plugin-history.json`，负责升级识别、启停状态比对与首次扫描 |
+| `src/client.js` | Client 半边。全部逻辑在这里：`FooterToggle`（折叠 + 网格 + 顺序套用 + 操作记录图标）、`ActivityWindow`（操作记录窗口，注册在 `shell.overlay`）、`DisplaySettingsTab`（设置页）、localStorage 读写与偏好广播、点击采集与 `$mount` 远程贡献 |
 | `test/smoke.js` | 零依赖冒烟检查：`node test/smoke.js`。桩掉 `window.__ModuleLoader__` / react，断言两个槽注册的元数据 + 设置页读写偏好的默认值规则。不进 npm 包 |
 | `cordis.patch.yml` | 往 profile 里插入一行插件加载记录（包名 `dsh-toomuch-plugins`，即仓库根） |
 | `locale/{en,zh}.json` | 插件列表里显示的标题和描述 |
@@ -148,14 +149,89 @@ class 名可能被构建工具 hash 或改名，而「直接子元素 `<nav>`」
 `package.json` 的 `exports` 把 Host 半边指向 `.`（`src/index.js`），Client 半边指向
 `./client`（`src/client.js`）；DSH 通过这两个入口分别加载。
 
-## 7. 兼容性风险
+## 7. 插件操作记录（0.4.0）
+
+### 数据来源
+
+DSH 的插件管理器（`@deepseek-ai/dsh-plugin-manager`）在每次安装、删除、启用/禁用、
+版本豁免时都会 `ownerContext.parallel('plugin-manager/operation', operation)` 发一个事件。
+事件形状（取自插件管理器源码）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `reason` | `install` / `remove` / `plugin`（单个插件开关）/ `bundle`（插件包开关）；版本豁免也走 `bundle` |
+| `stage` | `install` / `remove` / `enable` |
+| `target` | 包名（安装 / 删除 / 包开关）或 loader entry id（单个插件开关） |
+| `enabled` | 开关请求的目标状态 |
+| `phase` | `started`（操作前）/ `settled`（操作后） |
+| `application` | `applied` / `restart-required` / `overridden` / `failed` / `cancelled` |
+| `version` | 操作涉及的版本（删除时是被删包的版本） |
+| `time` | ISO 时间戳 |
+
+Host 半边在 `ctx.on('plugin-manager/operation', ...)` 上挂监听 —— cordis 的事件总线是
+app 级共享的，别的插件发的事件这里收得到。**只记 `settled` 且 `application` 不是
+`failed` / `cancelled` 的操作。**
+
+### 名称怎么来
+
+- 安装 / 删除 / 包开关：`target` 就是包名。
+- 单个插件开关：`target` 是 loader entry id，用 `pluginInventory.list()` 换成模块名
+  （拿不到就退回 `pluginManager.listPlugins()`）。**必须在 `started` 阶段换**：插件被关掉
+  后它的 entry 可能已经不在树里了。
+
+### 升级怎么排除
+
+DSH 的升级 = 先 `removeBundle` 再 `installBundle` 同一个包。所以：
+
+- 删除事件先**扣着**不写，等一个可能的重装；
+- 紧接着的重装如果版本**不同** → 判定为升级，删除与重装两条一起丢弃；
+- 版本**相同** → 是真的「删了又装回去」，两条都保留；
+- 等不到重装 → 这次删除是真的，按时写入。
+
+### 启停怎么判定
+
+`reason: 'bundle'` 也会被版本豁免复用（豁免只改兼容性文件，不改任何开关状态）。
+所以判定不靠事件措辞、而靠**状态比对**：操作前后各读一次「这个包 / 这个 entry 现在
+是开是关」（包看 profile manifest 的 `dsh.profile.bundles`，entry 看 loader 的
+`disabled`），前后一样就说明这次事件没有真的切换 → 不记。
+
+### 展示窗口
+
+- 「安装/删除」：全量；「启用/禁用」：只显示最近 30 天（滚动窗口，由 Host 半边在
+  `list()` 里过滤）。
+- 两个标签页都按时间**倒序**返回（`list()` 里 `reverse().sort(newestFirst)`，稳定排序，
+  时间相同的时候保留写入顺序的倒序）。
+- 每行的操作列是 14px 线条图标，按状态色着色：安装 = 向下箭头、删除 = 向上箭头、
+  启用 = 电源开、禁用 = 电源关；同时给图标一个 `aria-label`（「安装」等），屏幕阅读器
+  能读出来。行高下文字标签看不清，所以不用文字。
+- 首次安装没有历史：扫一遍 profile，把已装的插件（及其开关状态）作为起点记下；这些行
+  标记 `baseline`，时间列显示**扫描时间**并追加一个「初始」小标记——既不编造安装时间，
+  时间列也不会空着。
+
+### 文件格式
+
+`~/.dsh/plugins/dsh-toomuch-plugins/plugin-history.json`：
+
+```json
+{
+  "version": 1,
+  "events": [
+    { "action": "install", "name": "dsh-docker", "version": "0.16.1", "time": "2026-11-09T02:19:28.000Z" },
+    { "action": "disable", "name": "dsh-docker", "version": null, "time": "2026-11-09T02:20:11.000Z", "baseline": true }
+  ]
+}
+```
+
+上限 2000 条（超出丢最旧的）—— 这是日志，不是数据库。
+
+## 8. 兼容性风险
 
 - 本插件依赖 DSH 内部 DOM 结构。DSH 改版后如果侧栏结构变了，最坏情况是**找不到目标
   `<nav>`，什么都不做** —— 不会报错、不会弄坏界面，属于安全失效。
 - 不 import DSH 内部包，因此 DSH 升级不会让插件直接加载失败。
 - 样式全部走 `--dsw-alias-*` 变量，不写死颜色；主题改动时不会失配。
 
-## 8. 验证清单
+## 9. 验证清单
 
 改完代码后至少过一遍：
 
@@ -190,8 +266,17 @@ class 名可能被构建工具 hash 或改名，而「直接子元素 `<nav>`」
 25. 把某个第三方条目列进显示顺序：它出现在侧栏列表里并按顺序排；清空顺序后回到
     原来的位置（网格模式开关不受影响）。
 26. 点击第三方条目的图标 / 搜索框内部，计数同样累加；页面外区域的点击不计数。
+27. 侧栏底部「收起 / 展开全局面板」开关**右侧**出现一个时钟图标；点开是一个带两个标签
+    的窗口（「安装/删除」「启用/禁用」），浮在应用之上、不会被侧栏裁掉；Esc 或点遮罩关闭。
+28. 首次安装：窗口里已经有一份「初始状态」清单（当前装着的插件 + 它们是开是关），
+    `plugin-history.json` 存在且 `baseline` 为 true。
+29. 在插件面板里装一个插件 → 「安装/删除」标签出现一条带插件名与时间的记录。
+30. 卸载一个插件 → 同标签出现一条「删除」记录。
+31. 启用 / 禁用一个插件（或插件包）→ 「启用/禁用」标签出现对应记录，插件名可读。
+32. 升级一个插件 → 两个标签都不出现它的记录（升级既不算删除也不算安装）。
+33. 把系统时间往前拨一个月以上（或造一条旧记录）→ 旧的启停记录不再显示，安装/删除仍全量在。
 
-## 9. 后续可能的扩展（都没做）
+## 10. 后续可能的扩展（都没做）
 
 - 支持「折叠时仍显示某一个常用面板」（0.2.0 起已有收起保留 N 个/行；单个面板级的挑选还没做）。
 - 按 `click-counts.json` 的计数**智能自动排序**（当前只记录，未消费）。

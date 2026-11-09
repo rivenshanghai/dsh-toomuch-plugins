@@ -85,6 +85,8 @@ const KEYS = [
   'collapse', 'expand', 'tab', 'grid', 'columns', 'collapsedCount', 'collapsedRows', 'collapsedHint',
   'iconSize', 'sizeSm', 'sizeMid', 'sizeLg', 'sizeHint',
   'orderTitle', 'orderPick', 'orderHint', 'orderEmpty', 'orderUp', 'orderDown', 'orderRemove',
+  'history', 'historyTitle', 'tabInstallRemove', 'tabEnableDisable', 'historyEmpty', 'historyUnavailable',
+  'historyBaseline', 'close', 'actionInstall', 'actionRemove', 'actionEnable', 'actionDisable',
 ]
 assert.deepStrictEqual(Object.keys(dicts.sidebarPanelCollapse.zh).sort(), [...KEYS].sort(), 'zh keys')
 assert.deepStrictEqual(Object.keys(dicts.sidebarPanelCollapse.en).sort(), [...KEYS].sort(), 'en keys')
@@ -92,7 +94,7 @@ assert.deepStrictEqual(Object.keys(dicts.sidebarPanelCollapse.en).sort(), [...KE
 // Both slots register exactly once, with the expected metadata.
 assert.deepStrictEqual(
   injected.sort(),
-  ['settings.plugins.tab', 'sidebar.footer.action'],
+  ['settings.plugins.tab', 'shell.overlay', 'sidebar.footer.action'],
   'slots injected',
 )
 const footer = registrations.find((r) => r.entry.name === 'sidebar.footer.action')
@@ -110,6 +112,14 @@ assert.deepStrictEqual(
 assert.strictEqual(typeof tab.entry.label, 'function', 'tab label is a function')
 assert.ok(tab.entry.label().includes('tab'), 'tab label resolves through t()')
 
+// The activity window is registered in the shell overlay.
+const overlay = registrations.find((r) => r.entry.name === 'shell.overlay')
+assert.deepStrictEqual(
+  { id: overlay.entry.id, order: overlay.entry.order, locale: overlay.entry.locale },
+  { id: 'plugin-activity-window', order: 60, locale: 'sidebarPanelCollapse' },
+  'overlay registration',
+)
+
 // --- component renders ----------------------------------------------------
 const t = (key) => `t:${key}`
 const footerTree = footer.component({ t, wide: true })
@@ -117,6 +127,89 @@ assert.strictEqual(footerTree.props.className, 'dsh-spc-layer', 'footer wrapper'
 const footerBtn = footerTree.children.find((c) => c.type === 'button')
 assert.strictEqual(footerBtn.props['aria-label'], 't:expand', 'collapsed -> button offers "expand"')
 assert.strictEqual(footerBtn.props['aria-expanded'], false, 'collapsed by default')
+
+// The activity entry sits right of the toggle, as an icon.
+const footerButtons = footerTree.children.filter((c) => c.type === 'button')
+assert.strictEqual(footerButtons.length, 2, 'toggle plus activity icon')
+const histBtn = footerButtons[1]
+assert.strictEqual(histBtn.props.className, 'dsh-spc-histBtn', 'activity icon button')
+assert.strictEqual(histBtn.props['aria-label'], 't:history', 'activity icon is labelled')
+
+// --- the activity window --------------------------------------------------
+// Driven through its real open handler and remote call. The fake remote
+// answers the way DSH's transport does — an `{ ok, value }` envelope — so
+// this pins that the payload is unwrapped before the rows are rendered.
+const historyCalls = []
+const fakeHistory = {
+  list: async () => {
+    historyCalls.push('list')
+    return {
+      ok: true,
+      value: {
+        installRemove: [{ action: 'install', name: 'dsh-x', time: '2026-11-01T00:00:00.000Z' }],
+        enableDisable: [],
+      },
+    }
+  },
+}
+ctx.get = (name) => (name === 'remote.spcHistory' ? fakeHistory : name === 'remote.spcClicks' ? fakeRpc : undefined)
+// The mount settles on a microtask; give it a tick before driving the window.
+await new Promise((resolve) => setTimeout(resolve, 0))
+
+const openHandlers = []
+global.window.addEventListener = (type, fn) => {
+  if (type === 'dsh-toomuch-plugins:open-activity') openHandlers.push(fn)
+}
+global.window.removeEventListener = (type, fn) => {
+  if (type === 'dsh-toomuch-plugins:open-activity') {
+    const at = openHandlers.indexOf(fn)
+    if (at >= 0) openHandlers.splice(at, 1)
+  }
+}
+
+// A state store that survives re-renders (hooks are indexed by call order,
+// so the store is persistent and the counter resets each render).
+const slots = []
+let hookIndex = 0
+const render = () => { hookIndex = 0; return overlay.component({}) }
+const realUseState = React.useState
+React.useState = (init) => {
+  const i = hookIndex++
+  if (slots[i] === undefined) slots[i] = typeof init === 'function' ? init() : init
+  return [slots[i], (v) => { slots[i] = typeof v === 'function' ? v(slots[i]) : v }]
+}
+effects.length = 0
+assert.strictEqual(render(), null, 'closed by default')
+const firstEffects = effects.slice()
+for (const effect of firstEffects) effect()
+assert.strictEqual(openHandlers.length, 1, 'the window listens for the open event')
+
+openHandlers[0]()
+await new Promise((resolve) => setTimeout(resolve, 0))
+const windowTree = render()
+assert.deepStrictEqual(historyCalls, ['list'], 'the history is fetched on open')
+assert.strictEqual(windowTree.props.className, 'dsh-spc-modalMask', 'activity window mask')
+const modal = windowTree.children.find((c) => c.props && c.props.className === 'dsh-spc-modal')
+assert.ok(modal, 'activity window dialog')
+const tabs = modal.children.find((c) => c.props && c.props.className === 'dsh-spc-tabs')
+assert.strictEqual(tabs.children.length, 2, 'two tabs')
+assert.ok(tabs.children[0].children[0].includes('tabInstallRemove'), 'first tab is install/remove')
+assert.ok(tabs.children[1].children[0].includes('tabEnableDisable'), 'second tab is enable/disable')
+const body = modal.children.find((c) => c.props && c.props.className === 'dsh-spc-modalBody')
+const row = body.children[0]
+assert.strictEqual(row.props.className, 'dsh-spc-histRow', 'one row per record')
+assert.ok(row.children.some((c) => c.children && c.children[0] === 'dsh-x'), 'the plugin name is shown')
+// The action is an icon, not text: the badge carries an svg and an aria-label.
+const badge = row.children.find((c) => c.props && String(c.props.className).includes('dsh-spc-histBadge'))
+assert.ok(badge, 'the action badge is present')
+assert.ok(badge.props['aria-label'].includes('actionInstall'), 'the badge is labelled for screen readers')
+assert.strictEqual(badge.children[0].type, 'svg', 'the badge is an icon, not text')
+// The stub nests the path array one level deep.
+assert.strictEqual(badge.children[0].children[0].length, 3, 'the install icon has three strokes')
+// A real timestamp is shown (the fake remote returns one).
+const time = row.children.find((c) => c.props && c.props.className === 'dsh-spc-histTime')
+assert.ok(time.children[0].includes('2026-11-01'), 'the row shows a time')
+React.useState = realUseState
 
 // Flatten a rendered tree into a node list (the react stub returns plain
 // {type, props, children} nodes).
@@ -537,6 +630,12 @@ assert.deepStrictEqual(descriptor.invocation, { kind: 'direct' }, 'descriptor in
 assert.strictEqual(descriptor.parameters[0].source, 'json', 'parameter source')
 assert.strictEqual(descriptor.parameters[0].codec.mode, 'strict', 'parameter strict codec')
 assert.strictEqual(descriptor.result.mode, 'strict', 'result strict codec')
+const historyDescriptor = contribution.descriptors[1]
+assert.strictEqual(historyDescriptor.service, 'spcHistory', 'history descriptor service')
+assert.strictEqual(historyDescriptor.namespace, 'spcHistory', 'history descriptor namespace')
+assert.strictEqual(historyDescriptor.method, 'list', 'history descriptor method')
+assert.deepStrictEqual(historyDescriptor.parameters, [], 'history descriptor takes no parameters')
+assert.strictEqual(historyDescriptor.result.mode, 'strict', 'history result strict codec')
 assert.ok(clickHandler, 'document click listener registered')
 
 // A sidebar panel row (nav button, aria-label == panel label) is reported.
@@ -582,7 +681,7 @@ const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'spc-smoke-'))
 process.env.DSH_HOME = tmpHome
 const host = await import('../src/index.js')
 const provided = {}
-host.apply({ provide: (name, value) => { provided[name] = value } })
+host.apply({ provide: (name, value) => { provided[name] = value }, on: () => {}, get: () => undefined })
 const svc = provided.spcClicks
 assert.ok(svc, 'host provides spcClicks')
 assert.deepStrictEqual(
@@ -606,6 +705,143 @@ assert.deepStrictEqual(JSON.parse(fs.readFileSync(countsFile, 'utf8')), { plugin
 fs.writeFileSync(countsFile, 'not json')
 assert.strictEqual(await svc.recordClick('market'), 1, 'recovers after corrupt file')
 assert.deepStrictEqual(JSON.parse(fs.readFileSync(countsFile, 'utf8')), { market: 1 }, 'rewritten after corrupt file')
+
+// --- host half: the plugin activity log -----------------------------------
+// The host listens for `plugin-manager/operation` and keeps what was
+// installed, removed, enabled or disabled in plugin-history.json.
+const profileDir = path.join(tmpHome, 'profile')
+fs.mkdirSync(profileDir, { recursive: true })
+const manifest = (deps, bundles = []) =>
+  fs.writeFileSync(path.join(profileDir, 'package.json'), JSON.stringify({ dependencies: deps, dsh: { profile: { bundles } } }))
+manifest({ 'dsh-old': '1.0.0' })
+const listeners = {}
+const hostCtx = {
+  provide: (name, value) => { provided[name] = value },
+  on: (name, fn) => { listeners[name] = fn },
+  get: (name) => (name === 'profileContext' ? { dir: profileDir } : undefined),
+}
+host.apply(hostCtx)
+const historySvc = provided.spcHistory
+assert.ok(historySvc, 'host provides spcHistory')
+assert.deepStrictEqual(
+  { service: historySvc.typertRemote.service === historySvc, serviceKey: historySvc.typertRemote.serviceKey },
+  { service: true, serviceKey: 'spcHistory' },
+  'history typertRemote binding',
+)
+const historyMarker = Object.getPrototypeOf(historySvc)['@deepseek-ai/dsh-typert-protocol/remote-methods']
+assert.deepStrictEqual(historyMarker.methods.map((m) => m.method), ['list'], 'history remote method')
+assert.ok(listeners['plugin-manager/operation'], 'host listens for plugin-manager/operation')
+
+const { createRecorder } = await import('../src/history.js')
+const recorder = createRecorder(hostCtx, { removeGraceMs: 0 })
+const op = (fields) => recorder.handle({ id: 'op-1', phase: 'settled', application: 'applied', time: '2026-11-01T00:00:00.000Z', ...fields })
+
+// An install of a package the profile did not have.
+manifest({ 'dsh-old': '1.0.0', 'dsh-new': '2.0.0' })
+await op({ reason: 'install', stage: 'install', target: 'dsh-new' })
+let log = recorder.list()
+assert.deepStrictEqual(
+  log.installRemove.map((e) => [e.action, e.name, e.version]),
+  [['install', 'dsh-new', '2.0.0']],
+  'install recorded',
+)
+
+// A removal of a package that is not installed any more.
+manifest({ 'dsh-old': '1.0.0' })
+await op({ reason: 'remove', stage: 'remove', target: 'dsh-new', version: '2.0.0' })
+log = recorder.list()
+assert.deepStrictEqual(
+  log.installRemove.map((e) => [e.action, e.name]),
+  [['remove', 'dsh-new'], ['install', 'dsh-new']],
+  'removal recorded, newest first',
+)
+
+// An upgrade is a removal followed by an installation of a newer version:
+// neither of the two is shown.
+manifest({ 'dsh-old': '1.0.0', 'dsh-up': '1.0.0' })
+await op({ reason: 'install', stage: 'install', target: 'dsh-up' })
+await op({ reason: 'remove', stage: 'remove', target: 'dsh-up', version: '1.0.0' })
+manifest({ 'dsh-old': '1.0.0', 'dsh-up': '2.0.0' })
+await op({ reason: 'install', stage: 'install', target: 'dsh-up' })
+log = recorder.list()
+assert.deepStrictEqual(
+  log.installRemove.filter((e) => e.name === 'dsh-up').map((e) => e.action),
+  ['install'],
+  'the upgrade itself is not shown, the first install stays',
+)
+
+// Enabling and disabling a plugin is recorded with its name.
+await op({ reason: 'plugin', stage: 'enable', target: 'dsh-mcp', enabled: false })
+log = recorder.list()
+assert.deepStrictEqual(
+  log.enableDisable.map((e) => [e.action, e.name]),
+  [['disable', 'dsh-mcp']],
+  'plugin toggle recorded',
+)
+
+// A bundle toggle is recorded when it really changes the selection.
+manifest({ 'dsh-old': '1.0.0' }, ['dsh-docker'])
+await recorder.handle({ id: 'op-3', reason: 'bundle', stage: 'enable', target: 'dsh-docker', enabled: false, phase: 'started', application: 'applied', time: '2026-11-01T00:00:00.000Z' })
+manifest({ 'dsh-old': '1.0.0' }, [])
+await recorder.handle({ id: 'op-3', reason: 'bundle', stage: 'enable', target: 'dsh-docker', enabled: false, phase: 'settled', application: 'applied', time: '2026-11-01T00:00:00.000Z' })
+log = recorder.list()
+assert.ok(
+  log.enableDisable.some((e) => e.action === 'disable' && e.name === 'dsh-docker'),
+  'bundle toggle recorded',
+)
+
+// A version exemption is reported as a bundle change but switches nothing:
+// it is not a plugin toggle.
+await recorder.handle({ id: 'op-4', reason: 'bundle', stage: 'enable', target: 'dsh-docker', enabled: true, phase: 'started', application: 'applied', time: '2026-11-01T00:00:00.000Z' })
+await recorder.handle({ id: 'op-4', reason: 'bundle', stage: 'enable', target: 'dsh-docker', enabled: true, phase: 'settled', application: 'applied', time: '2026-11-01T00:00:00.000Z' })
+log = recorder.list()
+assert.strictEqual(
+  log.enableDisable.filter((e) => e.name === 'dsh-docker' && e.action === 'enable').length,
+  0,
+  'version exemptions are not toggles',
+)
+
+// Enable/disable records older than a month are not shown; installs are.
+const old = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString()
+await recorder.handle({ id: 'op-2', reason: 'plugin', stage: 'enable', target: 'dsh-mcp', enabled: true, phase: 'settled', application: 'applied', time: old })
+log = recorder.list()
+assert.ok(!log.enableDisable.some((e) => e.name === 'dsh-mcp' && e.time === old), 'old toggles are hidden')
+assert.strictEqual(log.installRemove.length, 3, 'installs and removals are all kept')
+
+// The log is returned newest first, by time.
+manifest({ 'dsh-old': '1.0.0', 'dsh-late': '1.0.0' })
+await recorder.handle({ id: 'op-5', reason: 'install', stage: 'install', target: 'dsh-late', phase: 'settled', application: 'applied', time: '2026-12-01T00:00:00.000Z' })
+log = recorder.list()
+const times = log.installRemove.map((e) => e.time)
+assert.deepStrictEqual(times, [...times].sort((a, b) => Date.parse(b) - Date.parse(a)), 'installs are newest first')
+assert.strictEqual(log.installRemove[0].name, 'dsh-late', 'the newest record is first')
+
+// The log itself is a plain file next to the plugin's other state.
+const historyFile = path.join(tmpHome, 'plugins', 'dsh-toomuch-plugins', 'plugin-history.json')
+const stored = JSON.parse(fs.readFileSync(historyFile, 'utf8'))
+assert.strictEqual(stored.version, 1, 'history file version')
+assert.ok(Array.isArray(stored.events) && stored.events.length > 0, 'history file holds the events')
+
+// --- first run: the profile is scanned once --------------------------------
+// With no log yet, the profile is scanned once and the plugins it already
+// had become the starting point of the history.
+const baselineHome = fs.mkdtempSync(path.join(os.tmpdir(), 'spc-baseline-'))
+const previousHome = process.env.DSH_HOME
+process.env.DSH_HOME = baselineHome
+const pluginDir = path.join(profileDir, 'node_modules', 'dsh-scan')
+fs.mkdirSync(pluginDir, { recursive: true })
+fs.writeFileSync(path.join(pluginDir, 'package.json'), JSON.stringify({ name: 'dsh-scan', version: '3.0.0', dsh: { bundle: 'cordis.patch.yml' } }))
+manifest({ 'dsh-old': '1.0.0', 'dsh-scan': '3.0.0' }, ['dsh-scan'])
+const fresh = createRecorder(hostCtx, { removeGraceMs: 0 })
+const freshLog = fresh.list()
+assert.ok(freshLog.installRemove.some((e) => e.name === 'dsh-scan' && e.baseline === true), 'the scan records what was installed')
+assert.ok(freshLog.enableDisable.some((e) => e.name === 'dsh-scan' && e.action === 'enable' && e.baseline === true), 'the scan records the state')
+assert.ok(!freshLog.installRemove.some((e) => e.name === 'dsh-old'), 'packages without a bundle are not plugins')
+const scannedAgain = createRecorder(hostCtx, { removeGraceMs: 0 })
+assert.strictEqual(scannedAgain.list().installRemove.length, freshLog.installRemove.length, 'the scan runs once')
+process.env.DSH_HOME = previousHome
+fs.rmSync(baselineHome, { recursive: true, force: true })
+
 fs.rmSync(tmpHome, { recursive: true, force: true })
 delete process.env.DSH_HOME
 

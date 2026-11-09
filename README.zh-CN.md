@@ -46,6 +46,9 @@ Studio、上下文、技能管理器、系统监控……七行大概 280px，�
 - **收起时保留部分入口** —— 列表模式可设收起后仍显示前 0–5 个入口；网格模式可设仍显示前 0–3 行（行数 × 列数）。默认 0，即全部收起。
 - **插件显示顺序** —— 设置页里从下拉框逐个挑选面板，列表顺序即侧栏显示顺序（以无损 CSS `order` 重排）；最多 20 项，重复项保存时自动去掉。下拉框也会列出绕过面板槽、自己插进侧栏的条目（今日值得读 / 全局搜索 / 容器等 `data-dsh-*-entry` 约定的插件）；被列出的会被收养进列表让顺序真正生效，清空后放回原位。
 - **点击计数** —— 点击面板入口会把计数累加进 `~/.dsh/plugins/dsh-toomuch-plugins/click-counts.json`，（远程不可用时静默跳过）。
+- **插件操作记录** —— 「收起 / 展开全局面板」按钮右侧多一个图标，点开是带两个标签的窗口：「安装/删除」（全量）与「启用/禁用」（最近一个月）。Host 半边监听 DSH 的 `plugin-manager/operation` 事件，把安装、删除、启用、禁用的**插件名与时间**记进 `~/.dsh/plugins/dsh-toomuch-plugins/plugin-history.json`。**升级不计入**：DSH 的升级就是「先删后装同一个包」，所以「删除后紧跟一个不同版本的重装」会被判定为升级并整体丢弃；版本豁免只动 bundle、不改开关状态，也不会被当成一次启停。
+- **首次扫描** —— 插件在某 profile 首次运行时还没有历史，于是扫一遍 profile，把已经装着的插件（以及当前是开是关）作为起点记下来；这些行带上扫描时间并追加一个「初始」小标记，时间列不会空着。
+- **操作列为图标、按时间倒序** —— 操作列不再用文字写「安装 / 删除 / 启用 / 禁用」（行高下看不清），改为按状态色画 14px 线条图标（安装向下箭头、删除向上箭头、启用电源开、禁用电源关），并给屏幕阅读器留 `aria-label`；两个标签页都按时间倒序返回。
 - **图标尺寸** —— 设置页可选 小（12px）/ 中（默认，侧栏原生尺寸）/ 大（24px）三档，
   列表与网格模式下的入口图标立刻缩放，刷新后保持。
 - **默认不折腾** —— 网格默认关闭，偏好和折叠状态一样存 `localStorage`，刷新、重启都保持。
@@ -105,11 +108,18 @@ dsh plugin --profile web add /path/to/dsh-toomuch-plugins
 6. 把自定义显示顺序写成 `<nav>` 直接子元素的 CSS `order` 覆盖（无损重排，不和 React
    的 DOM 调和打架），收起限额按**视觉顺序**保留前 N 个；
 7. 挂一份手写 Typert 远程贡献（dsh-cost-meter 同款接线），把面板点击报给 Host 半边，
-   由它累加进 `click-counts.json`。
+   由它累加进 `click-counts.json`；
+8. 在开关右侧画一个时钟图标，点开是操作记录窗口（注册在 `shell.overlay` 槽，浮在应用
+   之上而不是被侧栏裁掉），窗口内两个标签页「安装/删除」与「启用/禁用」，数据来自 Host
+   半边的 `spcHistory.list`。
 
-Host 半边（`src/index.js`）只提供 `spcClicks` 这一个服务：原型方法 + 手写
-`typertRemote` 绑定，靠 gateway 的 src 描述符兜底接通 —— 不生成清单、不 import
-DSH 内部包。
+Host 半边（`src/index.js`）提供两个服务：
+
+- `spcClicks` —— 上面那个点击计数；
+- `spcHistory` —— 插件操作记录。`src/history.js` 监听 `plugin-manager/operation`
+  （DSH 插件管理器在安装、删除、启用/禁用、版本豁免时发出的事件），只记录人在意的信息：
+  插件名、时间、动作。它靠「消失又换了个版本回来」认出升级，也只在开关状态真的变了
+  时才算一次启停。记录写在 `plugin-history.json`，和 `click-counts.json` 放在一起。
 
 依据是 DSH 自己的 `@deepseek-ai/dsh-client-ui-sidebar`：`nav.panelList` 是侧栏根节点的
 直接子元素，所以从底部按钮往上回溯一定能找到它。样式只用 `--dsw-alias-*` 主题变量，
@@ -125,8 +135,9 @@ DSH 内部包。
 ├── package.json            插件清单：dsh.bundle.patch + dsh.client
 ├── cordis.patch.yml        往 profile 里插入插件加载行
 ├── src/
-│   ├── index.js            Host 半边：spcClicks 远程服务 → click-counts.json
-│   └── client.js           Client 半边：底部开关 + 收起/展开 + 网格 + 显示顺序 + 点击上报
+│   ├── index.js            Host 半边：spcClicks / spcHistory 远程服务
+│   ├── history.js          Host 半边：插件操作记录器 → plugin-history.json
+│   └── client.js           Client 半边：底部开关 + 收起/展开 + 网格 + 显示顺序 + 点击上报 + 操作记录窗口
 ├── test/smoke.js           零依赖冒烟检查（node test/smoke.js）
 ├── locale/{en,zh}.json     插件列表里的标题与描述
 ├── docs/                   设计说明、市场提交、提交前清单

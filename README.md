@@ -63,6 +63,21 @@ entries**, and bring it back when you need it.
   order really applies, and released when the order is cleared.
 - **Click counting** — panel clicks accumulate into
   `~/.dsh/plugins/dsh-toomuch-plugins/click-counts.json`, (silently skipped when the remote is unavailable).
+- **Plugin activity log** — an icon right of the "collapse / expand global panels" toggle opens a
+  window with two tabs: **Install / remove** (every record) and **Enable / disable** (the last
+  month). The host half listens for DSH's `plugin-manager/operation` events and writes what was
+  installed, removed, enabled or disabled — with the plugin name and the time — to
+  `~/.dsh/plugins/dsh-toomuch-plugins/plugin-history.json`. **Upgrades are left out**: DSH performs
+  one as a removal followed by an installation of the same package, so a removal followed by an
+  installation of a *different* version is recognised as an upgrade and both records are dropped. A
+  version exemption changes a bundle without switching anything, so a toggle only counts when the
+  enablement state really changed. Each row shows the action as a 14px stroke icon on its state
+  colour (down-arrow for install, up-arrow for remove, power-on for enable, power-off for disable)
+  rather than text, and both tabs are returned newest first.
+- **First-run scan** — the first time the plugin runs in a profile it has no history yet, so it
+  scans the profile once and records the plugins that were already there (and whether they are
+  enabled) as the starting point. Those rows carry the scan time with an 「initial」 marker, so
+  the time column is never blank.
 - **Icon size** — pick small (12px), medium (the sidebar's own size, the
   default) or large (24px); the list and grid icons scale right away and the
   choice survives reloads.
@@ -134,11 +149,22 @@ Requirements: DSH (DeepSeek Harness) with a `web` profile; Node.js ≥ 20.
    makes the collapsed limit keep the first N entries *visually*;
 7. mounts a hand-rolled Typert remote contribution (the dsh-cost-meter pattern)
    and reports panel clicks to the host half, which accumulates them into
-   `click-counts.json` .
+   `click-counts.json` ;
+8. draws a clock icon right of the toggle; clicking it opens the activity
+   window (registered in the `shell.overlay` slot, so it floats over the app
+   instead of being clipped by the sidebar) with an 「安装/删除」 and an
+   「启用/禁用」 tab, fed by the host half's `spcHistory.list`.
 
-The host half (`src/index.js`) only provides that one `spcClicks` service:
-a prototype method plus a written-out `typertRemote` binding, picked up by the
-gateway's src-descriptor fallback — no generated manifest, no DSH internals.
+The host half (`src/index.js`) provides two services:
+
+- `spcClicks` — the click counts described above;
+- `spcHistory` — the plugin activity log. `src/history.js` listens for
+  `plugin-manager/operation` (the event DSH's plugin manager emits for every
+  install, removal, enable/disable toggle and version exemption) and records
+  what a person cares about: the plugin name, the time and the action. It
+  recognises an upgrade by the version that disappears and comes back, and it
+  only counts a toggle when the enablement state really changed. The log lives
+  in `plugin-history.json` next to `click-counts.json`.
 
 The basis is DSH's own `@deepseek-ai/dsh-client-ui-sidebar`: `nav.panelList` is a
 direct child of the sidebar root, so walking up from the footer button always
@@ -155,8 +181,9 @@ contract is written down in [docs/design.md](docs/design.md).
 ├── package.json            plugin manifest: dsh.bundle.patch + dsh.client
 ├── cordis.patch.yml        inserts the loader row into the profile
 ├── src/
-│   ├── index.js            Host half: spcClicks remote service → click-counts.json
-│   └── client.js           Client half: footer toggle + collapse/expand + grid + display order + click reporting
+│   ├── index.js            Host half: spcClicks / spcHistory remote services
+│   ├── history.js          Host half: the activity recorder → plugin-history.json
+│   └── client.js           Client half: footer toggle + collapse/expand + grid + display order + click reporting + activity window
 ├── test/smoke.js           zero-dependency smoke check (node test/smoke.js)
 ├── locale/{en,zh}.json     title and description in the plugin list
 ├── docs/                   design notes, market submission, pre-submit checklist

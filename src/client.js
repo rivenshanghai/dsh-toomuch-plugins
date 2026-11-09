@@ -22,6 +22,11 @@
  * Preferences live in localStorage too — same safe-default rules as the
  * collapse state. Details: docs/design.md.
  *
+ * Right of the toggle sits a clock icon: the plugin activity log. It opens a
+ * window (in the `shell.overlay` slot, so it floats over the app) with two
+ * tabs — installs and removals (all of them) and enable/disable toggles (the
+ * last month) — filled from the host half's `spcHistory.list`.
+ *
  * Styling uses only `--dsw-alias-*` theme tokens and the stylesheet rides
  * inside the component, so unmounting removes it.
  */
@@ -46,6 +51,51 @@ window.__ModuleLoader__.load({
     /** Icon-size marker classes (default keeps the sidebar's own size). */
     const SIZE_SM_CLASS = 'dsh-spc-size-sm'
     const SIZE_LG_CLASS = 'dsh-spc-size-lg'
+    /** Event the footer icon fires; the activity window listens for it. */
+    const OPEN_EVENT = 'dsh-toomuch-plugins:open-activity'
+
+    /** Ask the activity window to open. */
+    function openHistory() {
+      if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return
+      window.dispatchEvent(new CustomEvent(OPEN_EVENT))
+    }
+
+    /** Local time as `YYYY-MM-DD HH:mm`; anything unparsable is shown as is. */
+    function formatTime(value) {
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) return typeof value === 'string' ? value : ''
+      const pad = (n) => String(n).padStart(2, '0')
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+    }
+
+    /**
+     * The action glyph for one history row: a 14px stroke icon per action,
+     * drawn on the row's state colour. Text badges were hard to read at this
+     * size, so the action is an icon with an `aria-label` for screen readers.
+     */
+    function actionIcon(action) {
+      const stroke = {
+        fill: 'none',
+        stroke: 'currentColor',
+        strokeWidth: 1.5,
+        strokeLinecap: 'round',
+        strokeLinejoin: 'round',
+        style: { display: 'block' },
+      }
+      const paths = {
+        install: ['M8 2.5v5', 'M5.2 5.3L8 8.1l2.8-2.8', 'M3.5 12.5h9'],
+        remove: ['M8 11.5V6.5', 'M5.2 9.3L8 6.5l2.8 2.8', 'M3.5 3.5l9 9'],
+        enable: ['M9.6 3.6A6.4 6.4 0 1 0 12.4 8', 'M9.1 1.6v3.4h3.4'],
+        disable: ['M9.6 3.6A6.4 6.4 0 1 0 12.4 8', 'M9.1 1.6v3.4h3.4', 'M2.6 13.4l10.8-10.8'],
+      }
+      const list = paths[action]
+      if (list === undefined) return null
+      return h(
+        'svg',
+        { viewBox: '0 0 16 16', width: 14, height: 14, 'aria-hidden': 'true', ...stroke },
+        list.map((d, i) => h('path', { key: i, d })),
+      )
+    }
 
     const ZH = {
       collapse: '收起全局面板',
@@ -68,6 +118,18 @@ window.__ModuleLoader__.load({
       orderUp: '上移',
       orderDown: '下移',
       orderRemove: '移除',
+      history: '插件操作记录',
+      historyTitle: '插件操作记录',
+      tabInstallRemove: '安装/删除',
+      tabEnableDisable: '启用/禁用',
+      historyEmpty: '暂无记录',
+      historyUnavailable: '记录不可用',
+      historyBaseline: '初始状态',
+      close: '关闭',
+      actionInstall: '安装',
+      actionRemove: '删除',
+      actionEnable: '启用',
+      actionDisable: '禁用',
     }
     const EN = {
       collapse: 'Collapse global panels',
@@ -90,17 +152,34 @@ window.__ModuleLoader__.load({
       orderUp: 'Move up',
       orderDown: 'Move down',
       orderRemove: 'Remove',
+      history: 'Plugin activity',
+      historyTitle: 'Plugin activity',
+      tabInstallRemove: 'Install / remove',
+      tabEnableDisable: 'Enable / disable',
+      historyEmpty: 'No records yet',
+      historyUnavailable: 'Records unavailable',
+      historyBaseline: 'initial state',
+      close: 'Close',
+      actionInstall: 'Install',
+      actionRemove: 'Remove',
+      actionEnable: 'Enable',
+      actionDisable: 'Disable',
     }
 
     const CSS = `
-.dsh-spc-layer{flex:none;align-items:center;width:100%;height:42px;margin:8px 0 0;display:flex;position:relative;box-sizing:border-box;}
-.dsh-spc-layer.dsh-spc-rail{width:36px;height:36px;margin:0;}
-.dsh-spc-row{box-sizing:border-box;width:calc(100% + 4px);height:42px;color:var(--dsw-alias-label-primary);cursor:pointer;background:0 0;border:none;border-radius:12px;align-items:center;gap:8px;margin:0 -2px;padding:0 10px 0 8px;font-family:inherit;font-size:14px;text-align:left;display:inline-flex;overflow:hidden;}
+.dsh-spc-layer{flex:1 1 auto;min-width:0;align-items:center;width:auto;height:42px;margin:8px 0 0;display:flex;position:relative;box-sizing:border-box;}
+.dsh-spc-layer.dsh-spc-rail{flex:none;width:36px;height:auto;margin:0;flex-direction:column;gap:4px;}
+.dsh-spc-row{box-sizing:border-box;flex:1 1 auto;min-width:0;height:42px;color:var(--dsw-alias-label-primary);cursor:pointer;background:0 0;border:none;border-radius:12px;align-items:center;gap:8px;margin:0 -2px;padding:0 10px 0 8px;font-family:inherit;font-size:14px;text-align:left;display:inline-flex;overflow:hidden;}
 .dsh-spc-row:hover{background:var(--dsw-alias-interactive-bg-hover);}
 .dsh-spc-row:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px;}
-.dsh-spc-row.dsh-spc-btnRail{width:36px;height:36px;border-radius:50%;justify-content:center;gap:0;margin:0;padding:0;}
+.dsh-spc-row.dsh-spc-btnRail{flex:none;width:36px;height:36px;border-radius:50%;justify-content:center;gap:0;margin:0;padding:0;}
 .dsh-spc-icon{flex:none;display:inline-flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-secondary);}
 .dsh-spc-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* The plugin activity entry: an icon right of the collapse toggle. */
+.dsh-spc-histBtn{flex:none;cursor:pointer;width:32px;height:32px;color:var(--dsw-alias-label-secondary);background:0 0;border:none;border-radius:10px;align-items:center;justify-content:center;display:inline-flex;margin:0 2px;}
+.dsh-spc-histBtn:hover{background:var(--dsw-alias-interactive-bg-hover);}
+.dsh-spc-histBtn:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px;}
+.dsh-spc-layer.dsh-spc-rail .dsh-spc-histBtn{width:36px;height:36px;border-radius:50%;margin:0;}
 nav.dsh-spc-grid{grid-template-columns:repeat(var(--dsh-spc-grid-cols,3),minmax(0,1fr));gap:4px;display:grid;}
 nav.dsh-spc-grid :is(button,[role=button],[data-spc-adopted]){box-sizing:border-box;justify-content:center;gap:0;margin:0;padding:7px 4px;width:100%;}
 nav.dsh-spc-grid :is(button,[role=button],[data-spc-adopted])>*:not(:first-child){display:none;}
@@ -111,6 +190,33 @@ nav [data-spc-hidden]{display:none;}
    symbols carry a viewBox, so the drawing scales with the viewport. */
 nav.dsh-spc-size-sm :is(button,[role=button],[data-spc-adopted]) svg{width:12px !important;height:12px !important;}
 nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px !important;height:24px !important;}
+`
+
+    /** Stylesheet of the plugin activity window (opened from the footer icon). */
+    const HIST_CSS = `
+.dsh-spc-modalMask{position:absolute;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--dsw-alias-bg-mask-1);}
+.dsh-spc-modal{box-sizing:border-box;width:min(520px,100%);max-height:min(70vh,560px);display:flex;flex-direction:column;overflow:hidden;background:var(--dsw-alias-bg-layer-3);border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);box-shadow:var(--dsw-shadow-lv2);color:var(--dsw-alias-label-primary);font-size:13px;}
+.dsh-spc-modalHead{align-items:center;gap:8px;display:flex;padding:12px 14px;border-bottom:.5px solid var(--dsw-alias-border-l3);}
+.dsh-spc-modalTitle{flex:1;min-width:0;font-size:14px;font-weight:600;}
+.dsh-spc-modalClose{cursor:pointer;width:26px;height:26px;color:var(--dsw-alias-label-secondary);background:0 0;border:none;border-radius:8px;font:inherit;line-height:1;display:inline-flex;align-items:center;justify-content:center;}
+.dsh-spc-modalClose:hover{background:var(--dsw-alias-interactive-bg-hover);}
+.dsh-spc-modalClose:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px;}
+.dsh-spc-tabs{gap:4px;display:flex;padding:8px 10px 0;}
+.dsh-spc-tab{cursor:pointer;padding:6px 10px;color:var(--dsw-alias-label-secondary);background:0 0;border:none;border-bottom:2px solid transparent;border-radius:8px 8px 0 0;font:inherit;}
+.dsh-spc-tab:hover{background:var(--dsw-alias-interactive-bg-hover);}
+.dsh-spc-tab:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px;}
+.dsh-spc-tab.dsh-spc-tabOn{color:var(--dsw-alias-label-primary);border-bottom-color:var(--dsw-alias-state-business-primary);}
+.dsh-spc-modalBody{min-height:0;overflow-y:auto;padding:8px 10px 12px;}
+.dsh-spc-histRow{align-items:center;gap:8px;display:flex;min-height:30px;padding:4px 6px;border-radius:8px;}
+.dsh-spc-histRow:nth-child(odd){background:var(--dsw-alias-bg-layer-2);}
+.dsh-spc-histBadge{flex:none;width:24px;height:24px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;}
+.dsh-spc-histBadge.dsh-spc-aInstall{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 16%,transparent);}
+.dsh-spc-histBadge.dsh-spc-aRemove{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 16%,transparent);}
+.dsh-spc-histBadge.dsh-spc-aEnable{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 16%,transparent);}
+.dsh-spc-histBadge.dsh-spc-aDisable{color:var(--dsw-alias-state-warn-primary);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 16%,transparent);}
+.dsh-spc-histName{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.dsh-spc-histTime{flex:none;color:var(--dsw-alias-label-secondary);font-size:12px;}
+.dsh-spc-histEmpty{color:var(--dsw-alias-label-secondary);padding:18px 6px;text-align:center;}
 `
 
     /** Stylesheet of the settings page (Settings → Built-in plugins tab). */
@@ -592,15 +698,48 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
           ),
           wide ? h('span', { className: 'dsh-spc-label' }, label) : null,
         ),
+        // The plugin activity entry: an icon right of the collapse toggle.
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dsh-spc-histBtn',
+            title: t('history'),
+            'aria-label': t('history'),
+            onClick: openHistory,
+          },
+          h(
+            'span',
+            { className: 'dsh-spc-icon', 'aria-hidden': 'true' },
+            h(
+              'svg',
+              {
+                viewBox: '0 0 16 16',
+                width: 16,
+                height: 16,
+                fill: 'none',
+                stroke: 'currentColor',
+                strokeWidth: 1.5,
+                strokeLinecap: 'round',
+                strokeLinejoin: 'round',
+                style: { display: 'block' },
+              },
+              h('path', { d: 'M2.6 8a5.4 5.4 0 1 0 1.6-3.9' }),
+              h('path', { d: 'M2.4 3.2V6h2.8' }),
+              h('path', { d: 'M8 5.1V8l2.1 1.7' }),
+            ),
+          ),
+        ),
       )
     }
 
     /**
-     * Client → host click reporting, hand-rolled Typert style (the
-     * dsh-cost-meter pattern): a strict-codec contribution the client mounts
-     * on `ctx.remote`, answered by the host half's `spcClicks.recordClick`.
-     * The host side uses the gateway's src-descriptor fallback, so no
-     * generated zod manifest is needed anywhere.
+     * Client → host calls, hand-rolled Typert style (the dsh-cost-meter
+     * pattern): strict-codec contributions the client mounts on `ctx.remote`,
+     * answered by the host half's `spcClicks.recordClick` (panel clicks) and
+     * `spcHistory.list` (the plugin activity log). The host side uses the
+     * gateway's src-descriptor fallback, so no generated zod manifest is
+     * needed anywhere.
      */
     const CLICK_CONTRIBUTION = {
       package: 'dsh-toomuch-plugins',
@@ -622,6 +761,15 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
           ],
           result: { mode: 'strict', typeSymbol: 'dsh-toomuch-plugins#ClickCount', schema: { parse: (v) => v }, create: () => ({ parse: (v) => v }) },
         },
+        {
+          id: 'dsh-toomuch-plugins#spcHistory/list',
+          service: 'spcHistory',
+          namespace: 'spcHistory',
+          method: 'list',
+          invocation: { kind: 'direct' },
+          parameters: [],
+          result: { mode: 'strict', typeSymbol: 'dsh-toomuch-plugins#ActivityLog', schema: { parse: (v) => v }, create: () => ({ parse: (v) => v }) },
+        },
       ],
     }
 
@@ -632,9 +780,11 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
         const t = ctx.locale.bind(NS)
         refreshListEntries(ctx)
 
-        // Report panel clicks to the host half (best effort: if the remote
-        // is unavailable the sidebar just keeps working without counts).
+        // Report panel clicks to the host half and read the plugin activity
+        // log from it (best effort: if the remote is unavailable the sidebar
+        // just keeps working without counts and without the activity window).
         let clickRpc = null
+        let historyRpc = null
         ctx.effect(() => {
           if (ctx.remote === undefined || typeof ctx.remote.$mount !== 'function') return undefined
           let cancelled = false
@@ -647,6 +797,7 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
               }
               dispose = d
               clickRpc = ctx.get('remote.spcClicks')
+              historyRpc = ctx.get('remote.spcHistory')
             })
             .catch(() => {
               // Mount failed: counts stay off, nothing else to clean up.
@@ -654,6 +805,7 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
           return () => {
             cancelled = true
             clickRpc = null
+            historyRpc = null
             if (dispose !== null) {
               try {
                 dispose()
@@ -676,6 +828,157 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
           document.addEventListener('click', onClick)
           return () => document.removeEventListener('click', onClick)
         }, 'dsh-toomuch-plugins: click count')
+
+        /**
+         * The plugin activity window. The footer icon fires OPEN_EVENT; the
+         * window lives in the shell overlay so it is not clipped by the
+         * sidebar. Two tabs: every install / removal, and the enable /
+         * disable records of the last month (the host applies that window).
+         */
+        function ActivityWindow() {
+          const [open, setOpen] = React.useState(false)
+          const [tab, setTab] = React.useState('installRemove')
+          const [log, setLog] = React.useState(null)
+          const [failed, setFailed] = React.useState(false)
+
+          const load = () => {
+            if (historyRpc === null) {
+              setLog(null)
+              setFailed(true)
+              return
+            }
+            Promise.resolve(historyRpc.list())
+              .then((result) => {
+                // A remote call answers with `{ ok, value }`; the payload is
+                // the value of a successful one.
+                const payload =
+                  result !== null && typeof result === 'object' && 'ok' in result
+                    ? result.ok === true
+                      ? result.value
+                      : null
+                    : result
+                setLog(payload ?? null)
+                setFailed(payload === null || payload === undefined)
+              })
+              .catch(() => {
+                setLog(null)
+                setFailed(true)
+              })
+          }
+
+          React.useEffect(() => {
+            if (typeof window === 'undefined') return undefined
+            const onOpen = () => {
+              setOpen(true)
+              load()
+            }
+            window.addEventListener(OPEN_EVENT, onOpen)
+            return () => window.removeEventListener(OPEN_EVENT, onOpen)
+          }, [])
+
+          React.useEffect(() => {
+            if (!open || typeof document === 'undefined') return undefined
+            const onKey = (event) => {
+              if (event.key === 'Escape') setOpen(false)
+            }
+            document.addEventListener('keydown', onKey)
+            return () => document.removeEventListener('keydown', onKey)
+          }, [open])
+
+          if (!open) return null
+
+          const events = log === null
+            ? []
+            : tab === 'installRemove'
+              ? (log.installRemove ?? [])
+              : (log.enableDisable ?? [])
+          const rows = events.map((event, index) => {
+            const action = typeof event.action === 'string' ? event.action : ''
+            const label = 'action' + action.charAt(0).toUpperCase() + action.slice(1)
+            // Baseline rows carry the scan time, not an install time; the
+            // marker keeps that honest while still showing a time.
+            const time =
+              formatTime(event.time) +
+              (event.baseline === true ? ` · ${t('historyBaseline')}` : '')
+            return h(
+              'div',
+              { className: 'dsh-spc-histRow', key: `${event.time}-${action}-${event.name}-${index}` },
+              h(
+                'span',
+                { className: 'dsh-spc-histBadge dsh-spc-a' + action, 'aria-label': t(label) },
+                actionIcon(action),
+              ),
+              h('span', { className: 'dsh-spc-histName', title: event.name }, event.name),
+              h('span', { className: 'dsh-spc-histTime' }, time),
+            )
+          })
+
+          return h(
+            'div',
+            { className: 'dsh-spc-modalMask', onClick: () => setOpen(false) },
+            h(
+              'div',
+              {
+                className: 'dsh-spc-modal',
+                role: 'dialog',
+                'aria-modal': 'true',
+                'aria-label': t('historyTitle'),
+                onClick: (event) => event.stopPropagation(),
+              },
+              h('style', null, HIST_CSS),
+              h(
+                'div',
+                { className: 'dsh-spc-modalHead' },
+                h('span', { className: 'dsh-spc-modalTitle' }, t('historyTitle')),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dsh-spc-modalClose',
+                    'aria-label': t('close'),
+                    onClick: () => setOpen(false),
+                  },
+                  '✕',
+                ),
+              ),
+              h(
+                'div',
+                { className: 'dsh-spc-tabs', role: 'tablist' },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    role: 'tab',
+                    'aria-selected': tab === 'installRemove',
+                    className: 'dsh-spc-tab' + (tab === 'installRemove' ? ' dsh-spc-tabOn' : ''),
+                    onClick: () => setTab('installRemove'),
+                  },
+                  t('tabInstallRemove'),
+                ),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    role: 'tab',
+                    'aria-selected': tab === 'enableDisable',
+                    className: 'dsh-spc-tab' + (tab === 'enableDisable' ? ' dsh-spc-tabOn' : ''),
+                    onClick: () => setTab('enableDisable'),
+                  },
+                  t('tabEnableDisable'),
+                ),
+              ),
+              h(
+                'div',
+                { className: 'dsh-spc-modalBody' },
+                ...(failed
+                  ? [h('div', { className: 'dsh-spc-histEmpty' }, t('historyUnavailable'))]
+                  : rows.length === 0
+                    ? [h('div', { className: 'dsh-spc-histEmpty' }, t('historyEmpty'))]
+                    : rows),
+              ),
+            ),
+          )
+        }
 
         /**
          * The display settings page, mounted as this plugin's tab in the
@@ -902,6 +1205,14 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
           order: ORDER,
           locale: NS,
         }, FooterToggle))
+        // The plugin activity window lives in the shell overlay, so it is
+        // drawn over the whole app and never clipped by the sidebar.
+        ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+          name: 'shell.overlay',
+          id: 'plugin-activity-window',
+          order: 60,
+          locale: NS,
+        }, ActivityWindow))
         // Settings → Built-in plugins, where feature plugins own their pages
         // (the read-only inventory registers its own tab the same way).
         ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({

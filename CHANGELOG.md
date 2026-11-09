@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased / 未发布
 
+## 0.4.0 (2026-11-09)
+
+### Added / 新增
+
+- **Plugin activity log** — the sidebar footer gains an icon right of the 「收起 / 展开全局面板」 toggle; clicking it opens a window with two tabs: 「安装/删除」 (every record) and 「启用/禁用」 (the last month). The host half listens for DSH's `plugin-manager/operation` events and writes what was installed, removed, enabled or disabled — with the plugin name and the time — to `~/.dsh/plugins/dsh-toomuch-plugins/plugin-history.json` . Upgrades are left out: DSH performs one as a removal plus an installation of the same package, so a removal followed by an installation of a *different* version is recognised as an upgrade and both records are dropped. A version exemption also changes a bundle without switching anything, so a toggle only counts when the enablement state really changed. / **插件操作记录** —— 侧栏底部在「收起 / 展开全局面板」按钮右侧多一个图标，点开是一个带两个标签的窗口：「安装/删除」（全量）与「启用/禁用」（最近一个月）。Host 半边监听 DSH 的 `plugin-manager/operation` 事件，把安装、删除、启用、禁用的插件名与时间写入 `~/.dsh/plugins/dsh-toomuch-plugins/plugin-history.json` 。升级不计入：DSH 的升级就是「先删后装同一个包」，所以「删除后紧跟一个不同版本的重装」会被判定为升级，两条记录一并丢弃。版本豁免同样只动 bundle 而不改变开关状态，因此只有开关状态真的变了才算一次启停。
+- **First-run scan** — the first time the plugin runs in a profile it has no history yet, so it scans the profile once and records the plugins that were already there (and whether they are enabled) as the starting point. Those rows carry the scan time with an 「初始」 marker, so the time column is never blank. / **首次扫描** —— 插件在某 profile 首次运行时还没有历史，于是扫一遍 profile，把已经装着的插件（以及它们当前是开是关）作为起点记下来；这些行带上扫描时间并标一个「初始」小标记，时间列不会空着。
+
+### Changed / 变更
+
+- **Activity rows are icons, and sorted by time** — the action column no longer spells 「安装 / 删除 / 启用 / 禁用」 as text (illegible at row height); each action is a 14px stroke glyph on its state colour (down-arrow for install, up-arrow for remove, power-on for enable, power-off for disable) with an `aria-label` for screen readers. Both tabs are returned newest first, by timestamp. / **操作列改为图标并按时间倒序** —— 操作列不再用文字写「安装 / 删除 / 启用 / 禁用」（行高下看不清），改为按状态色画 14px 线条图标（安装向下箭头、删除向上箭头、启用电源开、禁用电源关），并给屏幕阅读器留 `aria-label`；两个标签页都按时间倒序返回。
+
 ## 0.3.1 (2026-11-03)
 
 ### Fixed / 修复
