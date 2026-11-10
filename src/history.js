@@ -60,6 +60,17 @@ function isEvent(value) {
 }
 
 /**
+ * Whether a record is one this module wrote. Baseline records — the initial
+ * listing of the plugins a profile already had — are dropped: they were not
+ * operations, and the list they produced was never true.
+ * @param value A parsed record.
+ * @returns True when the record is an operation worth showing.
+ */
+function isOperation(value) {
+  return isEvent(value) && value.baseline !== true
+}
+
+/**
  * Read the stored document. A missing or corrupt file reads as an empty one.
  * @param file Log path.
  * @returns `{ events, known }`; `known` is null when the file predates it.
@@ -75,7 +86,7 @@ function readDoc(file) {
         known.packages !== null &&
         typeof known.packages === 'object' &&
         Array.isArray(known.enabled)
-      return { events: parsed.events.filter(isEvent), known: usable ? known : null }
+      return { events: parsed.events.filter(isOperation), known: usable ? known : null }
     }
   } catch {
     // Missing or corrupt file: start from scratch.
@@ -98,56 +109,25 @@ function writeDoc(file, doc) {
 /**
  * The profile manifest, read once per comparison.
  * @param ctx Plugin context.
- * @returns `{ packages, enabled }`; both empty when the profile is unreadable.
+ * @returns `{ packages, enabled }`, or null when the profile cannot be read.
  */
 function profileState(ctx) {
   try {
     const profile = ctx.get('profileContext')
-    if (profile === undefined || profile === null || typeof profile.dir !== 'string') {
-      return { packages: {}, enabled: [] }
-    }
+    if (profile === undefined || profile === null || typeof profile.dir !== 'string') return null
     const manifest = JSON.parse(readFileSync(join(profile.dir, 'package.json'), 'utf8'))
     const dependencies = manifest?.dependencies
     const bundles = manifest?.dsh?.profile?.bundles
+    if (dependencies === null || typeof dependencies !== 'object') return null
     return {
-      packages: dependencies !== null && typeof dependencies === 'object' ? dependencies : {},
+      packages: dependencies,
       enabled: Array.isArray(bundles) ? bundles : [],
     }
   } catch {
-    // No profile or an unreadable manifest: nothing is known about it.
-    return { packages: {}, enabled: [] }
+    // No profile or an unreadable manifest: the state is unknown, which is
+    // not the same as an empty profile.
+    return null
   }
-}
-
-/**
- * The plugin bundles the profile installed, with whether they are enabled.
- * Only packages that declare a `dsh.bundle` are plugins; the profile's other
- * dependencies are support packages.
- * @param ctx Plugin context.
- * @returns The installed bundles: `{ name, version, enabled }`.
- */
-function profileBundles(ctx) {
-  let profile = null
-  try {
-    profile = ctx.get('profileContext')
-  } catch {
-    profile = null
-  }
-  if (profile === undefined || profile === null || typeof profile.dir !== 'string') return []
-  const { packages, enabled } = profileState(ctx)
-  const selected = new Set(enabled)
-  const bundles = []
-  for (const [name, version] of Object.entries(packages)) {
-    let manifest = null
-    try {
-      manifest = JSON.parse(readFileSync(join(profile.dir, 'node_modules', name, 'package.json'), 'utf8'))
-    } catch {
-      continue
-    }
-    if (manifest === null || typeof manifest !== 'object' || manifest.dsh?.bundle === undefined) continue
-    bundles.push({ name, version, enabled: selected.has(name) })
-  }
-  return bundles
 }
 
 /**
@@ -164,18 +144,14 @@ export function createRecorder(ctx, options = {}) {
   /** Package name -> the removal just written, which an upgrade must retract. */
   const recent = new Map()
 
-  // The first run: there is no history yet, so scan the profile once and
-  // record the plugins it already had as the starting point. The scan cannot
-  // know when they were installed, so these records are marked as a baseline.
+  // The first run has no history, and the plugins already installed are not
+  // news: they were installed before this log existed. So nothing is listed.
+  // The current state becomes the baseline the next comparison starts from.
+  // A log that predates the `known` snapshot is adopted the same way, so
+  // upgrading this plugin adds no records of its own.
   if (!existsSync(file)) {
-    const at = new Date(clock()).toISOString()
-    const events = []
-    for (const bundle of profileBundles(ctx)) {
-      events.push({ action: 'install', name: bundle.name, version: bundle.version, time: at, baseline: true })
-      events.push({ action: bundle.enabled ? 'enable' : 'disable', name: bundle.name, version: null, time: at, baseline: true })
-    }
     try {
-      writeDoc(file, { events, known: null })
+      writeDoc(file, { events: [], known: null })
     } catch {
       // No writable log: the window simply stays empty.
     }
@@ -212,7 +188,11 @@ export function createRecorder(ctx, options = {}) {
    */
   function sync() {
     const doc = readDoc(file)
-    const { packages, enabled } = profileState(ctx)
+    const state = profileState(ctx)
+    // An unreadable profile is an unknown state, not an empty one: recording
+    // it would claim every installed plugin was just removed.
+    if (state === null) return []
+    const { packages, enabled } = state
     const selected = new Set(enabled)
     const at = new Date(clock()).toISOString()
     const now = clock()

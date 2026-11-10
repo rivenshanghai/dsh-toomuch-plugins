@@ -70,13 +70,13 @@ entries**, and bring it back when you need it.
   change events: plugins are installed and removed from the settings panel, from the plugin market
   and from the `dsh` CLI, and only the first of those announces what it did. **Upgrades are left
   out**: DSH upgrades by removing the package and installing it again, so a package that reappears
-  with another version retracts the removal it started with. Each row shows the action as a 14px
-  stroke icon on its state colour (down-arrow for install, up-arrow for remove, power-on for
-  enable, power-off for disable) rather than text, and both tabs are returned newest first.
-- **First-run scan** — the first time the plugin runs in a profile it has no history yet, so it
-  scans the profile once and records the plugins that were already there (and whether they are
-  enabled) as the starting point. Those rows carry the scan time with an 「initial」 marker, so
-  the time column is never blank.
+  with another version retracts the removal it started with. Each row shows the action as a 16px
+  stroke icon rather than text, coloured by state — **install and enable are green** (the power
+  symbol), **remove and disable are red** (the power symbol with a bar through it) — and the
+  plugin name and the time are set larger than the body text. Both tabs are returned newest first.
+- **First run lists nothing** — the plugins a profile already has were installed before this log
+  existed, so they are not news: the window starts empty and the current state becomes the
+  baseline the next comparison starts from. Only what happens afterwards is a record.
 - **Icon size** — pick small (12px), medium (the sidebar's own size, the
   default) or large (24px); the list and grid icons scale right away and the
   choice survives reloads.

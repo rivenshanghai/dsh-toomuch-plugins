@@ -86,7 +86,7 @@ const KEYS = [
   'iconSize', 'sizeSm', 'sizeMid', 'sizeLg', 'sizeHint',
   'orderTitle', 'orderPick', 'orderHint', 'orderEmpty', 'orderUp', 'orderDown', 'orderRemove',
   'history', 'historyTitle', 'tabInstallRemove', 'tabEnableDisable', 'historyEmpty', 'historyUnavailable',
-  'historyBaseline', 'close', 'actionInstall', 'actionRemove', 'actionEnable', 'actionDisable',
+  'close', 'actionInstall', 'actionRemove', 'actionEnable', 'actionDisable',
 ]
 assert.deepStrictEqual(Object.keys(dicts.sidebarPanelCollapse.zh).sort(), [...KEYS].sort(), 'zh keys')
 assert.deepStrictEqual(Object.keys(dicts.sidebarPanelCollapse.en).sort(), [...KEYS].sort(), 'en keys')
@@ -235,6 +235,31 @@ assert.strictEqual(badge.children[0].children[0].length, 3, 'the install icon ha
 const time = row.children.find((c) => c.props && c.props.className === 'dsh-spc-histTime')
 assert.ok(time.children[0].includes('2026-11-01'), 'the row shows a time')
 React.useState = realUseState
+
+// The four action icons are drawn, not spelled out, and the name and the time
+// are large enough to read.
+const histStyle = modal.children.find((c) => c.type === 'style')
+assert.ok(histStyle, 'the activity window mounts its stylesheet')
+const histCss = histStyle.children[0]
+assert.ok(typeof histCss === 'string', 'the stylesheet is text')
+assert.ok(histCss.includes('.dsh-spc-histName'), 'the stylesheet has the row rules')
+const histRule = (selector) => {
+  const match = new RegExp(selector.replace(/[.[\]]/g, '\\$&') + '\\{([^}]*)\\}').exec(histCss)
+  assert.ok(match, 'style rule ' + selector)
+  return match[1]
+}
+assert.ok(histRule('.dsh-spc-histName').includes('font-size:14px'), 'the plugin name is large')
+assert.ok(histRule('.dsh-spc-histTime').includes('font-size:13px'), 'the time is large')
+// Install and enable are green; remove and disable are red.
+const badgeColour = (action) => {
+  // The class is `dsh-spc-a` plus the capitalised action.
+  const rule = histRule('.dsh-spc-histBadge.dsh-spc-a' + action.charAt(0).toUpperCase() + action.slice(1))
+  return /error-primary/.test(rule) ? 'red' : /success-primary/.test(rule) ? 'green' : 'other'
+}
+assert.strictEqual(badgeColour('install'), 'green', 'install is green')
+assert.strictEqual(badgeColour('enable'), 'green', 'enable is green')
+assert.strictEqual(badgeColour('remove'), 'red', 'remove is red')
+assert.strictEqual(badgeColour('disable'), 'red', 'disable is red')
 
 // Flatten a rendered tree into a node list (the react stub returns plain
 // {type, props, children} nodes).
@@ -840,25 +865,56 @@ assert.deepStrictEqual(times, [...times].sort((a, b) => Date.parse(b) - Date.par
 assert.strictEqual(onDisk().version, 2, 'history file version')
 assert.ok(onDisk().known !== null && typeof onDisk().known.packages === 'object', 'the file remembers the profile')
 
-// --- first run: the profile is scanned once --------------------------------
-// With no log yet, the profile is scanned once and the plugins it already
-// had become the starting point of the history.
+// --- first run: nothing is listed ------------------------------------------
+// The plugins a profile already had were installed before this log existed,
+// so they are not news. The first comparison adopts them silently.
 const baselineHome = fs.mkdtempSync(path.join(os.tmpdir(), 'spc-baseline-'))
 const previousHome = process.env.DSH_HOME
 process.env.DSH_HOME = baselineHome
-const pluginDir = path.join(profileDir, 'node_modules', 'dsh-scan')
-fs.mkdirSync(pluginDir, { recursive: true })
-fs.writeFileSync(path.join(pluginDir, 'package.json'), JSON.stringify({ name: 'dsh-scan', version: '3.0.0', dsh: { bundle: 'cordis.patch.yml' } }))
 manifest({ 'dsh-old': '1.0.0', 'dsh-scan': '3.0.0' }, ['dsh-scan'])
 const fresh = createRecorder(hostCtx, { removeGraceMs: UPGRADE_WINDOW })
 const freshLog = fresh.list()
-assert.ok(freshLog.installRemove.some((e) => e.name === 'dsh-scan' && e.baseline === true), 'the scan records what was installed')
-assert.ok(freshLog.enableDisable.some((e) => e.name === 'dsh-scan' && e.action === 'enable' && e.baseline === true), 'the scan records the state')
-assert.ok(!freshLog.installRemove.some((e) => e.name === 'dsh-old'), 'packages without a bundle are not plugins')
-const scannedAgain = createRecorder(hostCtx, { removeGraceMs: UPGRADE_WINDOW })
-assert.strictEqual(scannedAgain.list().installRemove.length, freshLog.installRemove.length, 'the scan runs once')
+assert.deepStrictEqual(freshLog.installRemove, [], 'the first run lists no plugins')
+assert.deepStrictEqual(freshLog.enableDisable, [], 'the first run lists no switches')
+assert.ok(
+  JSON.parse(fs.readFileSync(historyPath(), 'utf8')).known !== null,
+  'the first run adopts the profile as the baseline',
+)
+// A plugin installed after that is a real operation.
+manifest({ 'dsh-old': '1.0.0', 'dsh-scan': '3.0.0', 'dsh-later': '1.0.0' }, ['dsh-scan'])
+assert.ok(
+  createRecorder(hostCtx, { removeGraceMs: UPGRADE_WINDOW }).list().installRemove.some((e) => e.name === 'dsh-later'),
+  'a plugin installed later is recorded',
+)
+// A log written before the known snapshot is adopted the same way: it adds
+// no records of its own.
+process.env.DSH_HOME = previousHome
+const legacyHome = fs.mkdtempSync(path.join(os.tmpdir(), 'spc-legacy-'))
+process.env.DSH_HOME = legacyHome
+fs.mkdirSync(path.join(legacyHome, 'plugins', 'dsh-toomuch-plugins'), { recursive: true })
+fs.writeFileSync(
+  historyPath(),
+  JSON.stringify({
+    version: 1,
+    events: [
+      { action: 'install', name: 'dsh-old', version: '1.0.0', time: '2026-01-01T00:00:00.000Z', baseline: true },
+      { action: 'remove', name: 'dsh-gone', version: '1.0.0', time: '2026-01-02T00:00:00.000Z' },
+    ],
+  }),
+)
+const legacy = createRecorder(hostCtx, { removeGraceMs: UPGRADE_WINDOW })
+const legacyLog = legacy.list()
+assert.ok(
+  !legacyLog.installRemove.some((e) => e.name === 'dsh-old'),
+  'the initial listing is not shown',
+)
+assert.ok(
+  legacyLog.installRemove.some((e) => e.name === 'dsh-gone' && e.action === 'remove'),
+  'a real operation in an old log is kept',
+)
 process.env.DSH_HOME = previousHome
 fs.rmSync(baselineHome, { recursive: true, force: true })
+fs.rmSync(legacyHome, { recursive: true, force: true })
 
 fs.rmSync(tmpHome, { recursive: true, force: true })
 delete process.env.DSH_HOME

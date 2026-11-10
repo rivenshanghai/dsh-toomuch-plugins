@@ -69,7 +69,7 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * The action glyph for one history row: a 14px stroke icon per action,
+     * The action glyph for one history row: a 16px stroke icon per action,
      * drawn on the row's state colour. Text badges were hard to read at this
      * size, so the action is an icon with an `aria-label` for screen readers.
      */
@@ -77,22 +77,25 @@ window.__ModuleLoader__.load({
       const stroke = {
         fill: 'none',
         stroke: 'currentColor',
-        strokeWidth: 1.5,
+        strokeWidth: 1.8,
         strokeLinecap: 'round',
         strokeLinejoin: 'round',
         style: { display: 'block' },
       }
       const paths = {
-        install: ['M8 2.5v5', 'M5.2 5.3L8 8.1l2.8-2.8', 'M3.5 12.5h9'],
-        remove: ['M8 11.5V6.5', 'M5.2 9.3L8 6.5l2.8 2.8', 'M3.5 3.5l9 9'],
-        enable: ['M9.6 3.6A6.4 6.4 0 1 0 12.4 8', 'M9.1 1.6v3.4h3.4'],
-        disable: ['M9.6 3.6A6.4 6.4 0 1 0 12.4 8', 'M9.1 1.6v3.4h3.4', 'M2.6 13.4l10.8-10.8'],
+        // A package going in: an arrow down onto a line.
+        install: ['M8 2.5v5.4', 'M5.2 5.1L8 7.9l2.8-2.8', 'M3.2 13.5h9.6'],
+        // A package coming out: the same arrow, the other way.
+        remove: ['M8 13.5V8.1', 'M5.2 10.9L8 8.1l2.8 2.8', 'M3.2 2.5h9.6'],
+        // A switch: the power symbol, then the same with a bar through it.
+        enable: ['M12.2 4.4a6 6 0 1 1-8.4 0', 'M8 1.4v6.6'],
+        disable: ['M12.2 4.4a6 6 0 1 1-8.4 0', 'M8 1.4v6.6', 'M3.2 12.8l9.6-9.6'],
       }
       const list = paths[action]
       if (list === undefined) return null
       return h(
         'svg',
-        { viewBox: '0 0 16 16', width: 14, height: 14, 'aria-hidden': 'true', ...stroke },
+        { viewBox: '0 0 16 16', width: 16, height: 16, 'aria-hidden': 'true', ...stroke },
         list.map((d, i) => h('path', { key: i, d })),
       )
     }
@@ -124,7 +127,6 @@ window.__ModuleLoader__.load({
       tabEnableDisable: '启用/禁用',
       historyEmpty: '暂无记录',
       historyUnavailable: '记录不可用',
-      historyBaseline: '初始状态',
       close: '关闭',
       actionInstall: '安装',
       actionRemove: '删除',
@@ -158,7 +160,6 @@ window.__ModuleLoader__.load({
       tabEnableDisable: 'Enable / disable',
       historyEmpty: 'No records yet',
       historyUnavailable: 'Records unavailable',
-      historyBaseline: 'initial state',
       close: 'Close',
       actionInstall: 'Install',
       actionRemove: 'Remove',
@@ -210,15 +211,15 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
 .dsh-spc-tab:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px;}
 .dsh-spc-tab.dsh-spc-tabOn{color:var(--dsw-alias-label-primary);border-bottom-color:var(--dsw-alias-state-business-primary);}
 .dsh-spc-modalBody{min-height:0;overflow-y:auto;padding:8px 10px 12px;}
-.dsh-spc-histRow{align-items:center;gap:8px;display:flex;min-height:30px;padding:4px 6px;border-radius:8px;}
+.dsh-spc-histRow{align-items:center;gap:10px;display:flex;min-height:36px;padding:5px 8px;border-radius:8px;}
 .dsh-spc-histRow:nth-child(odd){background:var(--dsw-alias-bg-layer-2);}
-.dsh-spc-histBadge{flex:none;width:24px;height:24px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;}
+.dsh-spc-histBadge{flex:none;width:28px;height:28px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;}
 .dsh-spc-histBadge.dsh-spc-aInstall{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 16%,transparent);}
 .dsh-spc-histBadge.dsh-spc-aRemove{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 16%,transparent);}
 .dsh-spc-histBadge.dsh-spc-aEnable{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 16%,transparent);}
-.dsh-spc-histBadge.dsh-spc-aDisable{color:var(--dsw-alias-state-warn-primary);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 16%,transparent);}
-.dsh-spc-histName{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.dsh-spc-histTime{flex:none;color:var(--dsw-alias-label-secondary);font-size:12px;}
+.dsh-spc-histBadge.dsh-spc-aDisable{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 16%,transparent);}
+.dsh-spc-histName{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:600;}
+.dsh-spc-histTime{flex:none;color:var(--dsw-alias-label-secondary);font-size:13px;}
 .dsh-spc-histEmpty{color:var(--dsw-alias-label-secondary);padding:18px 6px;text-align:center;}
 `
 
@@ -898,11 +899,6 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
           const rows = events.map((event, index) => {
             const action = typeof event.action === 'string' ? event.action : ''
             const label = 'action' + action.charAt(0).toUpperCase() + action.slice(1)
-            // Baseline rows carry the scan time, not an install time; the
-            // marker keeps that honest while still showing a time.
-            const time =
-              formatTime(event.time) +
-              (event.baseline === true ? ` · ${t('historyBaseline')}` : '')
             return h(
               'div',
               { className: 'dsh-spc-histRow', key: `${event.time}-${action}-${event.name}-${index}` },
@@ -912,7 +908,7 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
                 actionIcon(action),
               ),
               h('span', { className: 'dsh-spc-histName', title: event.name }, event.name),
-              h('span', { className: 'dsh-spc-histTime' }, time),
+              h('span', { className: 'dsh-spc-histTime' }, formatTime(event.time)),
             )
           })
 
