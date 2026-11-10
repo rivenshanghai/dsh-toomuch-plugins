@@ -13,6 +13,7 @@
 | --- | --- | --- |
 | FR-1 采集层 | 订阅 dsh 运行时事件，只记录观察到的事实 | `src/collect.js` |
 | FR-2 归属解析层 | 给定一次调用，回答它是哪个插件的 | `src/attribution.js` |
+| FR-3 能力档案 | 每个插件「能做什么」+「实际做了什么」 | `src/profile.js` |
 | 落盘 | 最小字段 JSONL 追加写 | `src/store.js` |
 
 事件流写在 `<DSH_HOME>/plugins/dsh-plugin-insight/events.jsonl`
@@ -55,9 +56,21 @@ unknown            认不出来
 }
 ```
 
+## 能力档案（FR-3）
+
+每格都要有证据来源，推不出来的留空并在 `unknown` 里点名，不拿猜测填表：
+
+| 维度 | 来源 |
+| --- | --- |
+| `ui` | manifest 有 `dsh.client` → 有浏览器半边 |
+| `tools` / `skills` / `commands` | 插件自报声明 ∪ 事件流里实际观察到的名字 |
+| `hooks` / `data` / `auth` | **没有证据来源**，留空并在 `unknown` 里点名 |
+
+`declaredButInactive` = 声明了但一次都没被调用过的名字，就是 PRD 说的「安装未激活」。
+
 ## 对内服务
 
-宿主侧 `ctx.provide('pluginInsight', …)`，只读四个方法：
+宿主侧 `ctx.provide('pluginInsight', …)`，只读五个方法：
 
 ```js
 const insight = ctx.get('pluginInsight')
@@ -65,6 +78,7 @@ insight.resolve({ kind: 'tool', name: 'docker_exec' })
 // → { pluginId: 'pkg:@hyzyn/dsh-docker', confidence: 'high', candidates: [...] }
 insight.listPlugins()      // 已加载的插件清单
 insight.getAttributionMap()// 名称 → 归属 的静态映射
+insight.profiles()         // 能力档案，按调用次数倒序
 insight.eventsFile()       // 事件流落盘位置
 ```
 
@@ -83,14 +97,24 @@ insight.eventsFile()       // 事件流落盘位置
 ## 验证
 
 ```sh
+# 断言级：归属规则、手势识别、事件行组装、落盘、能力档案
 node packages/dsh-plugin-insight/test/smoke.js
+
+# 回放级：拿真实 profile 的编排行跑真实工具名，测命中率
+dsh --profile web --dump-config > .dsh-dump.yml
+node packages/dsh-plugin-insight/test/attribution-replay.js .dsh-dump.yml
 ```
+
+回放是这套系统唯一能证明「匹配规则在真实插件生态上准不准」的手段。当前实测
+41 个真实工具名：20 high / 17 medium / 4 unknown / **0 误判**。
 
 ## 已知边界
 
 - **归属靠命名约定**：没有自报声明时，前缀启发式可能误判（例如工具名首段恰好与
   某个无关插件的包名片段相同）。置信度 `medium` / `low` 就是留给这种情况的信号。
-- **核心工具里带下划号的那些**（如 `todo_write`）认不出归属，会落 `unknown`。
+- **带下划号的宿主核心工具认不出归属**：`create_goal` / `update_goal` /
+  `send_message` 会落 `unknown`。宿主工具大多无前缀（`bash` / `read` / `edit`），
+  少数带下划号的推不出归属，按 PRD「不硬猜」如实保留。
 - **用户批准**记成独立的 `approval` 事件行，不与工具调用合并——两条流合并要处理
   时序竞争，收益不抵复杂度。
 - 详见 `docs/adr/0003-插件归属解析.md`。

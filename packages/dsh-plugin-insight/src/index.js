@@ -10,15 +10,20 @@
  */
 import { createAttributor } from './attribution.js'
 import { createCollector } from './collect.js'
+import { createProfiler } from './profile.js'
 
 /**
- * 装配采集层与归属层，并注册只读服务。
+ * 装配采集层、归属层与能力档案，并注册只读服务。
  * @param {object} ctx 插件上下文。
  * @returns 对内暴露的只读服务。
  */
 export function apply(ctx) {
   const attributor = createAttributor(ctx)
   const collector = createCollector(ctx, { attributor })
+  const profiler = createProfiler(ctx, {
+    attributor,
+    eventsFile: collector.store.file,
+  })
 
   const service = {
     /**
@@ -48,6 +53,13 @@ export function apply(ctx) {
      */
     refresh() {
       attributor.refresh()
+    },
+    /**
+     * 每个插件的能力档案（FR-3）。
+     * @returns 档案数组，按调用次数倒序。
+     */
+    profiles() {
+      return profiler.profiles()
     },
     /**
      * 事件流落盘位置。

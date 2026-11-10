@@ -18,6 +18,7 @@
     "src/index.js",
     "src/attribution.js",
     "src/collect.js",
+    "src/profile.js",
     "src/store.js",
     "cordis.patch.yml",
     "README.md"

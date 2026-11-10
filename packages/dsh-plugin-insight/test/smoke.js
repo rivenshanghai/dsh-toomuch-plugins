@@ -8,8 +8,9 @@ import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createAttributor, normalize, prefixCandidates } from '../src/attribution.js'
+import { createAttributor, normalize, packageOf, prefixCandidates } from '../src/attribution.js'
 import { createCollector, gestureSkills } from '../src/collect.js'
+import { createProfiler, readEvents } from '../src/profile.js'
 import { createStore } from '../src/store.js'
 
 /**
@@ -279,5 +280,48 @@ assert.ok(approvalRow, '审批应记成审批行')
 assert.equal(approvalRow.name, 'bash')
 assert.equal(approvalRow.callId, 'call-9')
 assert.equal(approvalRow.outcome, 'allowed-once')
+
+// —— 能力档案（FR-3）——
+
+// 包装名：带 scope 与子路径两种形状。
+assert.equal(packageOf('@a/b/c'), '@a/b')
+assert.equal(packageOf('a/b'), 'a')
+assert.equal(packageOf('@a/b'), '@a/b')
+
+const profileEvents = join(profileDir, 'profile-events.jsonl')
+writeFileSync(
+  profileEvents,
+  [
+    // 声明了 tool_a 但一次没调用；tool_b 调过两次，其中一次出错。
+    JSON.stringify({ ts: 10, kind: 'plugin', pluginId: `pkg:${declaredModule}`, name: declaredModule }),
+    JSON.stringify({ ts: 20, kind: 'tool', name: 'tool_b', pluginId: `pkg:${declaredModule}`, error: false, sessionId: 's1' }),
+    JSON.stringify({ ts: 30, kind: 'tool', name: 'tool_b', pluginId: `pkg:${declaredModule}`, error: true, sessionId: 's2' }),
+    'not json at all',
+  ].join('\n') + '\n',
+)
+assert.equal(readEvents(profileEvents).length, 3, '坏行应被跳过')
+
+const profiler = createProfiler(
+  {},
+  {
+    attributor: {
+      listPlugins: () => [
+        { id: 'declared', moduleName: declaredModule, host: false, declared: ['my_custom_tool'] },
+      ],
+    },
+    eventsFile: profileEvents,
+    profileDir,
+  },
+)
+const [profile] = profiler.profiles()
+assert.equal(profile.pluginId, `pkg:${declaredModule}`)
+assert.equal(profile.version, '1.0.0', '应从 manifest 读到版本')
+assert.equal(profile.observed.calls, 2)
+assert.equal(profile.observed.errors, 1)
+assert.equal(profile.observed.sessions, 2, '两个会话应去重计数')
+assert.ok(profile.capabilities.tools.includes('my_custom_tool'), '自报的声明应进能力表')
+assert.ok(profile.capabilities.tools.includes('tool_b'), '观察到的名字应进能力表')
+assert.deepEqual(profile.declaredButInactive, ['my_custom_tool'], '声明了没调用的应被点出来')
+assert.ok(profile.unknown.includes('hooks'), '没有证据来源的维度应被点名')
 
 console.log('smoke: 全部断言通过')
