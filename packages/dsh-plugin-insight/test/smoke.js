@@ -368,4 +368,13 @@ const statsFile = join(profileDir, 'stats-events.jsonl')
 writeFileSync(statsFile, statRows.map((row) => JSON.stringify(row)).join('\n') + '\n')
 assert.equal(statsFromFile(statsFile, { now: 2000 }).totals.calls, 5, '从文件算统计')
 
+// 历史行与现行行的归属写法不同（早先按子模块记，现在按包归一），统计要合并它们。
+const mixedStats = computeStats([
+  { ts: 1000, kind: 'tool', name: 'a', pluginId: 'pkg:@scope/pkg/plugins/audio', callId: 'x1' },
+  { ts: 1000, kind: 'tool', name: 'b', pluginId: 'pkg:@scope/pkg', callId: 'x2' },
+], { now: 2000 })
+assert.equal(mixedStats.plugins.length, 1, '同一个包的两种写法合成一条')
+assert.equal(mixedStats.plugins[0].pluginId, 'pkg:@scope/pkg')
+assert.equal(mixedStats.plugins[0].calls, 2)
+
 console.log('smoke: 全部断言通过')

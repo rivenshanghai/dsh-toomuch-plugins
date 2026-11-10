@@ -13,9 +13,24 @@
  * 隐式都是 0，加载存活率却可能很高——这正是「安装未激活」要暴露的东西。
  */
 import { readEvents } from './profile.js'
+import { packageOf } from './attribution.js'
 
 /** 多少天内算「活跃」。 */
 const DEFAULT_ACTIVE_WINDOW_DAYS = 30
+
+/**
+ * 归一一个归属值。
+ *
+ * 事件流是长期累积的：早先的版本把子模块当成独立插件记下来（同一个包出现七条），
+ * 后来的版本改成按包归一。统计这一侧统一一次，历史行和新行才不会分裂成两个
+ * 插件。
+ * @param {string} pluginId 归属值。
+ * @returns 归一后的归属值。
+ */
+export function normalizePluginId(pluginId) {
+  if (typeof pluginId !== 'string' || !pluginId.startsWith('pkg:')) return pluginId
+  return `pkg:${packageOf(pluginId.slice(4))}`
+}
 
 /**
  * 一个插件的累加器。
@@ -82,7 +97,8 @@ export function computeStats(rows, options = {}) {
    * @param {string} pluginId 归属。
    * @returns 累加器。
    */
-  function bucketOf(pluginId) {
+  function bucketOf(rawId) {
+    const pluginId = normalizePluginId(rawId)
     let bucket = buckets.get(pluginId)
     if (bucket === undefined) {
       bucket = newBucket()
@@ -148,7 +164,7 @@ export function computeStats(rows, options = {}) {
   if (Array.isArray(options.profiles)) {
     for (const profile of options.profiles) {
       if (typeof profile?.pluginId !== 'string') continue
-      declaredByPlugin.set(profile.pluginId, profile.declaredButInactive ?? [])
+      declaredByPlugin.set(normalizePluginId(profile.pluginId), profile.declaredButInactive ?? [])
     }
   }
 
