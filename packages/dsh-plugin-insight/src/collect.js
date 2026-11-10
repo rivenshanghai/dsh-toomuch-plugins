@@ -18,6 +18,7 @@
  * 技能调用走的是名为 `skill` 的工具，用户手势走的是 `agent/pre-step` 的消息。
  */
 import { createStore } from './store.js'
+import { packageOf } from './attribution.js'
 
 /** 用户手写的技能手势 `/name`，与 dsh-tool-skill 的约定保持一致。 */
 const SKILL_GESTURE = /(^|\s)\/([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$)/g
@@ -125,7 +126,7 @@ export function createCollector(ctx, options = {}) {
         name: plugin.moduleName,
         action,
         reason: reason ?? null,
-        pluginId: plugin.host ? 'builtin' : `pkg:${plugin.moduleName}`,
+        pluginId: plugin.host ? 'builtin' : `pkg:${packageOf(plugin.moduleName)}`,
         confidence: 'high',
       })
     }

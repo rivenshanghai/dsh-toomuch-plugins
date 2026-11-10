@@ -81,24 +81,79 @@ export function prefixCandidates(name) {
 }
 
 /**
- * 候选词段是否作为连续一段出现在目标词段里。
- * @param {string[]} candidate 候选的词段。
- * @param {string[]} target 目标条目的词段。
- * @returns 是否命中。
+ * 包的身份：去掉子路径。
+ *
+ * 一个包可以插多行并指向自己的子模块（`dsh-mattpocock-skills-deck/tools`、
+ * `@example/p/plugins/runtime`）。归属的单位是**包**，不是行，所以比较前先
+ * 归一到一个包名。
+ * @param {string} moduleName 模块说明符。
+ * @returns 包名。
  */
-function containsRun(candidate, target) {
-  if (candidate.length === 0 || candidate.length > target.length) return false
-  for (let start = 0; start + candidate.length <= target.length; start += 1) {
-    let matched = true
-    for (let offset = 0; offset < candidate.length; offset += 1) {
-      if (candidate[offset] !== target[start + offset]) {
-        matched = false
-        break
-      }
-    }
-    if (matched) return true
+export function packageOf(moduleName) {
+  const name = String(moduleName ?? '')
+  if (name.startsWith('@')) {
+    const parts = name.split('/')
+    return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : name
   }
-  return false
+  return name.split('/')[0]
+}
+
+/**
+ * 前段是否逐项等于后段的开头。
+ * @param {string[]} head 待检查的前段。
+ * @param {string[]} body 目标词段。
+ * @returns 是否是其前缀。
+ */
+function isPrefix(head, body) {
+  if (head.length === 0 || head.length > body.length) return false
+  for (let index = 0; index < head.length; index += 1) {
+    if (head[index] !== body[index]) return false
+  }
+  return true
+}
+
+/**
+ * 候选前缀与某个条目的匹配强度。
+ *
+ * 只认三种有依据的形状，不做「任意位置包含」——实测那会让 `plugin_manager`
+ * 因为一个 `manager` 就命中 `skill-manager`：
+ *
+ *  - 完全相等：归一化后与行 id 或模块名一致（`skill_manager` ↔ `skill-manager`）。
+ *  - 条目是候选的开头：`docker` + `docker_exec`、`univer` + `univer_api`。
+ *  - 候选是条目的开头：`ssh` + `dsh-ssh-manage`。
+ *  - 候选首词等于条目的末段：`deck` + `dsh-mattpocock-skills-deck`（包名很长，
+ *    真正携带身份的是最后那一段）。
+ * @param {string} candidate 候选前缀。
+ * @param {object} entry 可归属对象。
+ * @returns 'high' / 'medium' / null。
+ */
+function matchStrength(candidate, entry) {
+  const norm = normalize(candidate)
+  if (norm === '') return null
+  if (norm === entry.idNorm || norm === entry.moduleNorm) return 'high'
+  const candidateSegments = significantSegments(candidate)
+  if (candidateSegments.length === 0) return null
+  for (const entrySegments of [entry.idSegments, entry.moduleSegments]) {
+    if (isPrefix(entrySegments, candidateSegments)) return 'medium'
+    if (isPrefix(candidateSegments, entrySegments)) return 'medium'
+    if (candidateSegments[0] === entrySegments[entrySegments.length - 1]) return 'medium'
+  }
+  return null
+}
+
+/**
+ * 模块名是不是一个包说明符（能当 npm 包名解析）。
+ *
+ * loader 树里混着两类东西：真正的包，和 cordis 自己的伪模块（`cordis:include`
+ * 之类）。后者不是插件，归属该算宿主自带。
+ * @param {string} moduleName 模块说明符。
+ * @returns 是否是包说明符。
+ */
+function isPackageSpecifier(moduleName) {
+  if (moduleName === '') return false
+  if (moduleName.includes(':')) return false
+  if (moduleName.startsWith('.') || moduleName.startsWith('/')) return false
+  return true
 }
 
 /**
@@ -115,31 +170,13 @@ function toEntry(options) {
   return {
     id,
     moduleName,
-    /** 宿主基座包（官方）还是用户插件。 */
-    host: moduleName.startsWith(HOST_MODULE_PREFIX),
+    /** 宿主基座包（官方）或 cordis 伪模块，而不是用户插件。 */
+    host: moduleName.startsWith(HOST_MODULE_PREFIX) || !isPackageSpecifier(moduleName),
     idNorm: normalize(id),
     moduleNorm: normalize(base),
     idSegments: significantSegments(id),
     moduleSegments: significantSegments(base),
   }
-}
-
-/**
- * 候选前缀与某个条目的匹配强度。
- * @param {string} candidate 候选前缀。
- * @param {object} entry 可归属对象。
- * @returns 'high' / 'medium' / null。
- */
-function matchStrength(candidate, entry) {
-  const norm = normalize(candidate)
-  if (norm === '') return null
-  // 完全相等：归一化后与行 id 或模块名一致（skill_manager ↔ skill-manager 走这条）。
-  if (norm === entry.idNorm || norm === entry.moduleNorm) return 'high'
-  // 落在模块名的一段里：deck ↔ dsh-mattpocock-skills-deck、study ↔ study-suite-runtime。
-  const candidateSegments = significantSegments(candidate)
-  if (containsRun(candidateSegments, entry.idSegments)) return 'medium'
-  if (containsRun(candidateSegments, entry.moduleSegments)) return 'medium'
-  return null
 }
 
 /**
@@ -253,6 +290,30 @@ export function createAttributor(ctx, options = {}) {
   }
 
   /**
+   * 在一批命中里挑归属：先按匹配强度分高下，再在同一档里偏向用户插件。
+   *
+   * 顺序反了会出事：宿主行 `skill`（`@deepseek-ai/dsh-skill`）精确命中，却会被
+   * `skill-manager` 的弱命中抢走——这是实测到的第一个误判。
+   * @param {Array<{entry: object, strength: string}>} hits 命中列表。
+   * @returns `{ result, confidence }`。
+   */
+  function pickHit(hits) {
+    const best = hits.some((hit) => hit.strength === 'high') ? 'high' : 'medium'
+    const top = hits.filter((hit) => hit.strength === best)
+    const userTop = top.filter((hit) => !hit.entry.host)
+    const chosen = userTop.length > 0 ? userTop : top
+    // 一个包可以插多行并指向自己的子模块，归属的单位是包，先按包去重再判断多候选。
+    const packages = [...new Set(chosen.map((hit) => packageOf(hit.entry.moduleName)))]
+    const confidence = best === 'high'
+      ? 'high'
+      : packages.length > 1 && userTop.length > 0
+        ? 'low'
+        : 'medium'
+    const pluginId = chosen[0].entry.host ? 'builtin' : `pkg:${packages[0]}`
+    return { result: { pluginId, confidence, candidates: packages }, confidence }
+  }
+
+  /**
    * 归属解析。
    *
    * @param {object} event 事件，形状 `{ kind, name }`。
@@ -283,27 +344,25 @@ export function createAttributor(ctx, options = {}) {
       return { pluginId: `skill:${name}`, confidence: 'high', candidates: [] }
     }
 
-    // 4) 名名前缀启发式：从长前缀往短试，先精确后宽松。
-    for (const candidate of prefixCandidates(name)) {
+    // 4) 名名前缀启发式。
+    //
+    // 两趟，不按候选长短一轮定输赢：长候选未必更准。`docker_ps` 的长候选会先撞上
+    // `docker` 行的「条目是候选开头」拿到 medium，如果就此返回，就永远走不到更短的
+    // `docker` —— 那才是精确命中。这是实测到的第二个误判。
+    const candidates = prefixCandidates(name)
+    let fallback = null
+    for (const candidate of candidates) {
       const hits = []
       for (const entry of current.entries) {
         const strength = matchStrength(candidate, entry)
         if (strength !== null) hits.push({ entry, strength })
       }
       if (hits.length === 0) continue
-      // 用户插件优先于宿主基座：同一前缀命中两边时，报用户插件更有信息量。
-      const userHits = hits.filter((hit) => !hit.entry.host)
-      const chosen = userHits.length > 0 ? userHits : hits
-      const modules = [...new Set(chosen.map((hit) => hit.entry.moduleName))]
-      const confidence = chosen.some((hit) => hit.strength === 'high')
-        ? 'high'
-        : modules.length > 1
-          ? 'low'
-          : 'medium'
-      const moduleName = modules[0]
-      const pluginId = chosen[0].entry.host ? 'builtin' : `pkg:${moduleName}`
-      return { pluginId, confidence, candidates: modules }
+      const picked = pickHit(hits)
+      if (picked.confidence === 'high') return picked.result
+      if (fallback === null) fallback = picked.result
     }
+    if (fallback !== null) return fallback
 
     // 5) 没有下划线前缀的名字：宿主基座工具的形态（bash / read / edit …）。
     if (!name.includes('_')) {
@@ -337,7 +396,7 @@ export function createAttributor(ctx, options = {}) {
     const current = ensure()
     const map = new Map()
     for (const entry of current.entries) {
-      const pluginId = entry.host ? 'builtin' : `pkg:${entry.moduleName}`
+      const pluginId = entry.host ? 'builtin' : `pkg:${packageOf(entry.moduleName)}`
       for (const name of declarationsOf(entry.moduleName)) map.set(name, pluginId)
       if (entry.id !== '') {
         map.set(entry.id, pluginId)

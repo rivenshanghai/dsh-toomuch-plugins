@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createAttributor, normalize, prefixCandidates } from '../src/attribution.js'
-import { gestureSkills } from '../src/collect.js'
+import { createCollector, gestureSkills } from '../src/collect.js'
 import { createStore } from '../src/store.js'
 
 /**
@@ -111,6 +111,69 @@ const unknown = attributor.resolve({ kind: 'tool', name: 'zzz_unmapped_thing' })
 assert.equal(unknown.pluginId, 'unknown')
 assert.equal(unknown.confidence, 'unknown')
 
+// —— 宿主行命中多个时，归属值仍然是 builtin，置信度不该被拖到 low ——
+// （实测发现：bash 同时命中 dsh-bash-local 与 dsh-bash-sandbox）
+const bashAttributor = createAttributor(
+  fakeCtx(
+    [
+      { id: 'dsh-bash-local', name: '@deepseek-ai/dsh-bash-local' },
+      { id: 'dsh-bash-sandbox', name: '@deepseek-ai/dsh-bash-sandbox' },
+    ],
+    profileDir,
+  ),
+)
+const bash = bashAttributor.resolve({ kind: 'tool', name: 'bash' })
+assert.equal(bash.pluginId, 'builtin')
+assert.equal(bash.confidence, 'medium')
+
+// —— cordis 伪模块不是插件 ——
+// （实测发现：cordis:include 被算成了 pkg:cordis:include）
+const pseudoAttributor = createAttributor(
+  fakeCtx([{ id: 'cordis-inspect', name: 'cordis:inspect' }], profileDir),
+)
+const pseudo = pseudoAttributor.resolve({ kind: 'tool', name: 'cordis_inspect_list' })
+assert.equal(pseudo.pluginId, 'builtin')
+
+// —— 精确命中优先于更长的宽松命中 ——
+// （实测发现：docker_ps 的长候选先撞上 docker 行的宽松匹配就提前返回，
+//   永远走不到更短的 docker —— 那才是精确命中）
+const orderedAttributor = createAttributor(
+  fakeCtx([{ id: 'docker', name: '@hyzyn/dsh-docker' }], profileDir),
+)
+const dockerPs = orderedAttributor.resolve({ kind: 'tool', name: 'docker_ps' })
+assert.equal(dockerPs.pluginId, 'pkg:@hyzyn/dsh-docker')
+assert.equal(dockerPs.confidence, 'high')
+
+// —— 宿主精确命中不会被用户插件的宽松命中抢走 ——
+// （实测发现：内置 skill 工具被归到了 skill-manager）
+const collisionAttributor = createAttributor(
+  fakeCtx(
+    [
+      { id: 'skill', name: '@deepseek-ai/dsh-skill' },
+      { id: 'skill-manager', name: '@yanglaofish/dsh-skill-manager' },
+    ],
+    profileDir,
+  ),
+)
+const skillTool = collisionAttributor.resolve({ kind: 'tool', name: 'skill' })
+assert.equal(skillTool.pluginId, 'builtin')
+assert.equal(skillTool.confidence, 'high')
+
+// —— 同一包的多行按包去重，不算多候选 ——
+// （实测发现：deck 命中了同包的两行，被误判成 low）
+const multiRowAttributor = createAttributor(
+  fakeCtx(
+    [
+      { id: 'dsh-mattpocock-skills-deck', name: 'dsh-mattpocock-skills-deck' },
+      { id: 'dsh-mattpocock-skills-deck-tools', name: 'dsh-mattpocock-skills-deck/tools' },
+    ],
+    profileDir,
+  ),
+)
+const deckTool = multiRowAttributor.resolve({ kind: 'tool', name: 'deck_context' })
+assert.equal(deckTool.pluginId, 'pkg:dsh-mattpocock-skills-deck')
+assert.equal(deckTool.confidence, 'medium')
+
 // —— 插件清单与静态映射 ——
 const plugins = attributor.listPlugins()
 assert.equal(plugins.length, 4)
@@ -134,5 +197,87 @@ assert.equal(store.append({ ts: 2, kind: 'tool', name: 'broken' }), true)
 const lines = readFileSync(eventsFile, 'utf8').trim().split('\n')
 assert.equal(lines.length, 2)
 assert.equal(JSON.parse(lines[0]).name, 'docker_exec')
+
+// —— 采集层：事件怎么变成事件行 ——
+
+/**
+ * 造一个只记录监听器的事件总线。
+ * @returns `{ handlers, ctx }`。
+ */
+function fakeEventCtx() {
+  const handlers = new Map()
+  return {
+    handlers,
+    ctx: {
+      on(name, listener) {
+        handlers.set(name, listener)
+        return () => {}
+      },
+    },
+  }
+}
+
+const captured = []
+const eventBus = fakeEventCtx()
+createCollector(eventBus.ctx, {
+  store: { file: 'memory', append: (row) => { captured.push(row); return true } },
+  attributor: {
+    resolve: (event) => ({ pluginId: `pkg:test:${event.name}`, confidence: 'high', candidates: [] }),
+    listPlugins: () => [],
+  },
+})
+
+// 名为 skill 的工具：技能 id 在参数里。
+const skillExec = {
+  callId: 'call-1',
+  name: 'skill',
+  arguments: { name: 'grilling' },
+  agent: { id: 'agent-1', session: { id: 'session-1' } },
+}
+eventBus.handlers.get('tools/pre-execute')(skillExec, () => 'allow')
+eventBus.handlers.get('tools/result')(skillExec, { isError: false })
+const skillRow = captured.find((row) => row.kind === 'skill')
+assert.ok(skillRow, '工具名为 skill 时应记成技能行')
+assert.equal(skillRow.name, 'grilling')
+assert.equal(skillRow.sessionId, 'session-1')
+assert.equal(skillRow.error, false)
+assert.equal(skillRow.pluginId, 'pkg:test:grilling')
+
+// 用户手势：不产生工具调用，只在进入步骤的消息里。
+eventBus.handlers.get('agent/pre-step')(
+  {
+    agent: { id: 'agent-1', session: { id: 'session-1' } },
+    messages: [{ source: { kind: 'user' }, content: [{ type: 'text', text: '/grill-with-docs' }] }],
+  },
+  () => 'ok',
+)
+const gestureRow = captured.find((row) => row.kind === 'skill' && row.source === 'user-gesture')
+assert.ok(gestureRow, '用户手势应记成技能行')
+assert.equal(gestureRow.name, 'grill-with-docs')
+
+// 命令：显式口径的一半。
+eventBus.handlers.get('session/event')(
+  { id: 'session-1' },
+  { type: 'command/run', data: { name: 'compact', source: { kind: 'user' } } },
+)
+const commandRow = captured.find((row) => row.kind === 'command')
+assert.ok(commandRow, '命令应记成命令行')
+assert.equal(commandRow.name, 'compact')
+assert.equal(commandRow.source, 'user')
+
+// 审批：与工具调用分开记，靠 callId 关联。
+eventBus.handlers.get('session/event')(
+  { id: 'session-1' },
+  { type: 'approval/asked', data: { id: 'ap-1', toolName: 'bash', callId: 'call-9' } },
+)
+eventBus.handlers.get('session/event')(
+  { id: 'session-1' },
+  { type: 'approval/decided', data: { id: 'ap-1', outcome: 'allowed-once' } },
+)
+const approvalRow = captured.find((row) => row.kind === 'approval')
+assert.ok(approvalRow, '审批应记成审批行')
+assert.equal(approvalRow.name, 'bash')
+assert.equal(approvalRow.callId, 'call-9')
+assert.equal(approvalRow.outcome, 'allowed-once')
 
 console.log('smoke: 全部断言通过')
