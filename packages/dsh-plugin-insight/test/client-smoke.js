@@ -123,6 +123,13 @@ assert.strictEqual(contributions.length, 1, '挂了一个 Typert 贡献')
 const descriptor = contributions[0].descriptors[0]
 assert.strictEqual(descriptor.service, 'pluginInsight', '调的是自己的宿主服务')
 assert.strictEqual(descriptor.method, 'stats', '调的是 stats')
+// Typert 的 validateCodec 只认顶层 create()：把它嵌进 schema 里会抛
+// "strict codec has no create() factory"，而 $mount 的失败被 catch 吞掉，
+// 表现就是页面一直显示「读不到统计数据」。
+assert.strictEqual(typeof descriptor.result.create, 'function', 'result 顶层要有 create()')
+assert.strictEqual(descriptor.result.mode, 'strict', 'result 是 strict 编码')
+assert.strictEqual(typeof descriptor.result.typeSymbol, 'string', 'result 要有类型符号')
+assert.strictEqual(typeof descriptor.result.create().parse, 'function', 'create() 返回带 parse 的 schema')
 
 // --- 渲染 -----------------------------------------------------------------
 // 远程调用在微任务里落地，先等一拍；再渲染一次，表格才有数据。

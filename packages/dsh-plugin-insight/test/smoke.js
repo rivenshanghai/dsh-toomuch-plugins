@@ -377,4 +377,9 @@ assert.equal(mixedStats.plugins.length, 1, '同一个包的两种写法合成一
 assert.equal(mixedStats.plugins[0].pluginId, 'pkg:@scope/pkg')
 assert.equal(mixedStats.plugins[0].calls, 2)
 
+// 统计结果要跨 Typert 远程传给浏览器，必须能无损 JSON 往返——
+// Map / Set / undefined 都会在线上变成别的形状。
+const roundTripped = JSON.parse(JSON.stringify(stats))
+assert.deepEqual(roundTripped, stats, '统计结果必须能无损 JSON 往返')
+
 console.log('smoke: 全部断言通过')

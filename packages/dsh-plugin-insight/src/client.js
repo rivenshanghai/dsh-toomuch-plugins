@@ -131,7 +131,15 @@ window.__ModuleLoader__.load({
           method: 'stats',
           invocation: { kind: 'direct' },
           parameters: [],
-          result: { mode: 'strict', typeSymbol: 'dsh-plugin-insight#UsageStats', schema: { parse: (v) => v, create: () => ({ parse: (v) => v }) } },
+          // `create` 必须与 `schema` 平级：Typert 的 validateCodec 只认顶层
+          // create()，缺了就抛 "strict codec has no create() factory"，而
+          // $mount 的失败很容易被吞掉，表现就是「宿主半边没有响应」。
+          result: {
+            mode: 'strict',
+            typeSymbol: 'dsh-plugin-insight#UsageStats',
+            schema: { parse: (v) => v },
+            create: () => ({ parse: (v) => v }),
+          },
         },
       ],
     }
@@ -184,8 +192,9 @@ window.__ModuleLoader__.load({
               dispose = d
               statsRpc = ctx.get('remote.pluginInsight')
             })
-            .catch(() => {
-              // Mount failed: the page shows "unavailable" and keeps the rest working.
+            .catch((error) => {
+              // 不静默：挂不上远程时把原因说出来，否则页面只剩一句「读不到统计数据」。
+              console.warn('[dsh-plugin-insight] 挂载统计远程失败，页面会显示「读不到统计数据」', error)
             })
           return () => {
             cancelled = true
