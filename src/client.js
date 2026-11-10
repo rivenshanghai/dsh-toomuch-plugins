@@ -53,11 +53,26 @@ window.__ModuleLoader__.load({
     const SIZE_LG_CLASS = 'dsh-spc-size-lg'
     /** Event the footer icon fires; the activity window listens for it. */
     const OPEN_EVENT = 'dsh-toomuch-plugins:open-activity'
+    /** Event the dsh-plugin-insight bundle fires to ask for its usage page. */
+    const USAGE_OPEN_EVENT = 'dsh-plugin-insight:open-usage'
+    /** Event dsh-plugin-insight fires once its client half is up. */
+    const USAGE_READY_EVENT = 'dsh-plugin-insight:ready'
+    /** Global dsh-plugin-insight sets when its client half is up. */
+    const USAGE_READY_FLAG = '__dshPluginInsightReady'
 
     /** Ask the activity window to open. */
     function openHistory() {
       if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return
       window.dispatchEvent(new CustomEvent(OPEN_EVENT))
+    }
+
+    /**
+     * Ask the plugin usage page to open. The page lives in the
+     * dsh-plugin-insight bundle; this bundle only asks.
+     */
+    function openUsage() {
+      if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return
+      window.dispatchEvent(new CustomEvent(USAGE_OPEN_EVENT))
     }
 
     /** Local time as `YYYY-MM-DD HH:mm`; anything unparsable is shown as is. */
@@ -132,6 +147,7 @@ window.__ModuleLoader__.load({
       actionRemove: '删除',
       actionEnable: '启用',
       actionDisable: '禁用',
+      usage: '插件使用率分析',
     }
     const EN = {
       collapse: 'Collapse global panels',
@@ -165,6 +181,7 @@ window.__ModuleLoader__.load({
       actionRemove: 'Remove',
       actionEnable: 'Enable',
       actionDisable: 'Disable',
+      usage: 'Plugin usage analysis',
     }
 
     const CSS = `
@@ -646,7 +663,19 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
       const wide = props.wide !== false
       const [collapsed, setCollapsed] = React.useState(readStored)
       const [prefs, setPrefs] = React.useState(readPrefs)
+      // The plugin usage page lives in another bundle; the button only shows
+      // up once that bundle announces itself.
+      const [usageReady, setUsageReady] = React.useState(false)
       const rootRef = React.useRef(null)
+
+      React.useEffect(() => {
+        if (typeof window === 'undefined') return undefined
+        const ready = () => setUsageReady(true)
+        // The other bundle may already be up when this one loads.
+        if (window[USAGE_READY_FLAG] === true) ready()
+        window.addEventListener(USAGE_READY_EVENT, ready)
+        return () => window.removeEventListener(USAGE_READY_EVENT, ready)
+      }, [])
 
       // Preferences written on the settings page re-render this toggle.
       React.useEffect(() => subscribePrefs(() => setPrefs(readPrefs())), [])
@@ -734,6 +763,43 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
             ),
           ),
         ),
+        // The plugin usage page: a full workspace page, not a popup. It lives in
+        // the dsh-plugin-insight bundle, so the button only shows up once that
+        // bundle's client half is up — a dead button is worse than no button.
+        usageReady
+          ? h(
+              'button',
+              {
+                type: 'button',
+                className: 'dsh-spc-histBtn',
+                title: t('usage'),
+                'aria-label': t('usage'),
+                onClick: openUsage,
+              },
+              h(
+                'span',
+                { className: 'dsh-spc-icon', 'aria-hidden': 'true' },
+                h(
+                  'svg',
+                  {
+                    viewBox: '0 0 16 16',
+                    width: 16,
+                    height: 16,
+                    fill: 'none',
+                    stroke: 'currentColor',
+                    strokeWidth: 1.5,
+                    strokeLinecap: 'round',
+                    strokeLinejoin: 'round',
+                    style: { display: 'block' },
+                  },
+                  h('path', { d: 'M2.4 13.2h11.2' }),
+                  h('path', { d: 'M4.4 13.2V8.6' }),
+                  h('path', { d: 'M7.6 13.2V4.4' }),
+                  h('path', { d: 'M10.8 13.2V6.8' }),
+                ),
+              ),
+            )
+          : null,
       )
     }
 

@@ -19,13 +19,16 @@
     "src/attribution.js",
     "src/collect.js",
     "src/profile.js",
+    "src/stats.js",
     "src/store.js",
+    "src/client.js",
     "cordis.patch.yml",
     "README.md"
   ],
   "exports": {
     ".": "./src/index.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./client": "./src/client.js"
   },
   "repository": {
     "type": "git",
@@ -34,6 +37,13 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout"
+      ]
     }
   }
 }

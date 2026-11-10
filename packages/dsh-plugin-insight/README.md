@@ -14,6 +14,8 @@
 | FR-1 采集层 | 订阅 dsh 运行时事件，只记录观察到的事实 | `src/collect.js` |
 | FR-2 归属解析层 | 给定一次调用，回答它是哪个插件的 | `src/attribution.js` |
 | FR-3 能力档案 | 每个插件「能做什么」+「实际做了什么」 | `src/profile.js` |
+| FR-4 使用率统计 | 三类口径分开算，不合并排行 | `src/stats.js` |
+| 整页视图 | 主工作区里的统计页（不是弹窗） | `src/client.js` |
 | 落盘 | 最小字段 JSONL 追加写 | `src/store.js` |
 
 事件流写在 `<DSH_HOME>/plugins/dsh-plugin-insight/events.jsonl`
@@ -68,6 +70,31 @@ unknown            认不出来
 
 `declaredButInactive` = 声明了但一次都没被调用过的名字，就是 PRD 说的「安装未激活」。
 
+## 使用率统计（FR-4）
+
+三类口径**分开算、不合并排行**：
+
+| 口径 | 分子 | 分母 |
+| --- | --- | --- |
+| 显式使用率 | 用户输入的命令、手写的 `/技能名` 手势、用户**批准过**的工具调用 | 活跃会话数 |
+| 隐式命中率 | 模型自己发起的调用（已扣掉被批准的那部分，两口径不重叠） | 代理步骤数 |
+| 加载存活率 | 该插件被加载过的启动次数 | DSH 启动次数 |
+
+「用户批准过的调用算显式」是有意的：它确属用户意志的表态。代价是被批准的调用会
+同时抬高显式分子——所以它**不再进隐式**，两边不重叠。
+
+## 整页视图
+
+统计页渲染在 `main` 槽——**主工作区的整页**，不是弹窗。侧栏那个按钮在另一个包里
+（`dsh-toomuch-plugins`），两边只靠窗口事件耦合：
+
+```
+侧栏按钮点击 → dispatch 'dsh-plugin-insight:open-usage'
+本包 client   → ctx.layout.selectPanel('plugin-insight-usage')
+本包 client 就绪 → dispatch 'dsh-plugin-insight:ready' + window.__dshPluginInsightReady
+侧栏按钮      → 收到就绪事件后才显示（没装本包就没有按钮，而不是一个死按钮）
+```
+
 ## 对内服务
 
 宿主侧 `ctx.provide('pluginInsight', …)`，只读五个方法：
@@ -79,10 +106,10 @@ insight.resolve({ kind: 'tool', name: 'docker_exec' })
 insight.listPlugins()      // 已加载的插件清单
 insight.getAttributionMap()// 名称 → 归属 的静态映射
 insight.profiles()         // 能力档案，按调用次数倒序
-insight.eventsFile()       // 事件流落盘位置
+insight.stats()            // 使用率统计
 ```
 
-这是**内部 API**，不承诺跨版本稳定。
+这是**内部 API**，不承诺跨版本稳定。整页通过 Typert 远程读 `stats`。
 
 ## 订阅的事件
 
@@ -97,8 +124,11 @@ insight.eventsFile()       // 事件流落盘位置
 ## 验证
 
 ```sh
-# 断言级：归属规则、手势识别、事件行组装、落盘、能力档案
+# 断言级：归属规则、手势识别、事件行组装、落盘、能力档案、统计口径
 node packages/dsh-plugin-insight/test/smoke.js
+
+# 客户端：main 槽注册、就绪广播、Typert 贡献、表格渲染
+node packages/dsh-plugin-insight/test/client-smoke.js
 
 # 回放级：拿真实 profile 的编排行跑真实工具名，测命中率
 dsh --profile web --dump-config > .dsh-dump.yml

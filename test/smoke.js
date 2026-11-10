@@ -6,11 +6,46 @@ import assert from 'node:assert'
 
 // --- browser stub ---------------------------------------------------------
 const store = new Map()
+// The window stub keeps a general event registry: the activity window listens
+// for its open event, the usage button fires the other bundle's open event.
+const openHandlers = []
+const usageReadyHandlers = []
+const usageOpenHandlers = []
+const dispatchedEvents = []
 global.window = {
   localStorage: {
     getItem: (k) => (store.has(k) ? store.get(k) : null),
     setItem: (k, v) => store.set(k, String(v)),
     removeItem: (k) => store.delete(k),
+  },
+  addEventListener: (type, fn) => {
+    if (type === 'dsh-toomuch-plugins:open-activity') openHandlers.push(fn)
+    else if (type === 'dsh-plugin-insight:ready') usageReadyHandlers.push(fn)
+    else if (type === 'dsh-plugin-insight:open-usage') usageOpenHandlers.push(fn)
+  },
+  removeEventListener: (type, fn) => {
+    const list =
+      type === 'dsh-toomuch-plugins:open-activity'
+        ? openHandlers
+        : type === 'dsh-plugin-insight:ready'
+          ? usageReadyHandlers
+          : type === 'dsh-plugin-insight:open-usage'
+            ? usageOpenHandlers
+            : null
+    if (list === null) return
+    const at = list.indexOf(fn)
+    if (at >= 0) list.splice(at, 1)
+  },
+  dispatchEvent: (event) => {
+    dispatchedEvents.push(event.type)
+    const list =
+      event.type === 'dsh-plugin-insight:ready'
+        ? usageReadyHandlers
+        : event.type === 'dsh-plugin-insight:open-usage'
+          ? usageOpenHandlers
+          : []
+    for (const fn of list.slice()) fn(event)
+    return true
   },
 }
 let loaded = null
@@ -87,6 +122,7 @@ const KEYS = [
   'orderTitle', 'orderPick', 'orderHint', 'orderEmpty', 'orderUp', 'orderDown', 'orderRemove',
   'history', 'historyTitle', 'tabInstallRemove', 'tabEnableDisable', 'historyEmpty', 'historyUnavailable',
   'close', 'actionInstall', 'actionRemove', 'actionEnable', 'actionDisable',
+  'usage',
 ]
 assert.deepStrictEqual(Object.keys(dicts.sidebarPanelCollapse.zh).sort(), [...KEYS].sort(), 'zh keys')
 assert.deepStrictEqual(Object.keys(dicts.sidebarPanelCollapse.en).sort(), [...KEYS].sort(), 'en keys')
@@ -129,11 +165,46 @@ assert.strictEqual(footerBtn.props['aria-label'], 't:expand', 'collapsed -> butt
 assert.strictEqual(footerBtn.props['aria-expanded'], false, 'collapsed by default')
 
 // The activity entry sits right of the toggle, as an icon.
-const footerButtons = footerTree.children.filter((c) => c.type === 'button')
+const footerButtons = footerTree.children.filter((c) => c !== null && c !== undefined && c.type === 'button')
 assert.strictEqual(footerButtons.length, 2, 'toggle plus activity icon')
 const histBtn = footerButtons[1]
 assert.strictEqual(histBtn.props.className, 'dsh-spc-histBtn', 'activity icon button')
 assert.strictEqual(histBtn.props['aria-label'], 't:history', 'activity icon is labelled')
+
+// The usage page lives in the dsh-plugin-insight bundle, so its button only
+// shows up once that bundle's client half announces itself. Until then the
+// footer keeps its two buttons — a dead button is worse than no button.
+const footerSlots = []
+let footerHook = 0
+const renderFooter = () => { footerHook = 0; return footer.component({ t, wide: true }) }
+const realFooterUseState = React.useState
+React.useState = (init) => {
+  const i = footerHook++
+  if (footerSlots[i] === undefined) footerSlots[i] = typeof init === 'function' ? init() : init
+  return [footerSlots[i], (v) => { footerSlots[i] = typeof v === 'function' ? v(footerSlots[i]) : v }]
+}
+effects.length = 0
+renderFooter()
+const footerEffects = effects.slice()
+for (const effect of footerEffects) effect()
+const beforeReady = renderFooter().children.filter((c) => c !== null && c !== undefined && c.type === 'button')
+assert.strictEqual(beforeReady.length, 2, 'no usage button before the other bundle is up')
+
+window.dispatchEvent(new CustomEvent('dsh-plugin-insight:ready'))
+const afterReady = renderFooter().children.filter((c) => c !== null && c !== undefined && c.type === 'button')
+assert.strictEqual(afterReady.length, 3, 'usage button appears once its bundle is up')
+const usageBtn = afterReady[2]
+assert.strictEqual(usageBtn.props.className, 'dsh-spc-histBtn', 'usage button sits next to the activity icon')
+assert.strictEqual(usageBtn.props['aria-label'], 't:usage', 'usage button is labelled')
+assert.strictEqual(usageBtn.children[0].children[0].type, 'svg', 'usage button is an icon, not text')
+// Clicking it asks the other bundle to open its page — it does not open a
+// popup itself.
+usageBtn.props.onClick()
+assert.ok(
+  dispatchedEvents.includes('dsh-plugin-insight:open-usage'),
+  'clicking asks the usage page to open',
+)
+React.useState = realFooterUseState
 
 // The layer must claim a whole line of the shared footer row. Shrinking it to
 // content slides a neighbouring footer action in beside the toggle, and a row
@@ -180,17 +251,6 @@ const fakeHistory = {
 ctx.get = (name) => (name === 'remote.spcHistory' ? fakeHistory : name === 'remote.spcClicks' ? fakeRpc : undefined)
 // The mount settles on a microtask; give it a tick before driving the window.
 await new Promise((resolve) => setTimeout(resolve, 0))
-
-const openHandlers = []
-global.window.addEventListener = (type, fn) => {
-  if (type === 'dsh-toomuch-plugins:open-activity') openHandlers.push(fn)
-}
-global.window.removeEventListener = (type, fn) => {
-  if (type === 'dsh-toomuch-plugins:open-activity') {
-    const at = openHandlers.indexOf(fn)
-    if (at >= 0) openHandlers.splice(at, 1)
-  }
-}
 
 // A state store that survives re-renders (hooks are indexed by call order,
 // so the store is persistent and the counter resets each render).

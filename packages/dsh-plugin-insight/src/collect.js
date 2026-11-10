@@ -23,6 +23,9 @@ import { packageOf } from './attribution.js'
 /** 用户手写的技能手势 `/name`，与 dsh-tool-skill 的约定保持一致。 */
 const SKILL_GESTURE = /(^|\s)\/([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$)/g
 
+/** 一次 DSH 进程的身份。dsh 启动次数 = 事件流里出现过的 boot 数。 */
+const BOOT = `${Date.now()}-${process.pid}`
+
 /**
  * 从消息批次里找出用户手写的技能手势。
  * @param {unknown} messages 本步骤认领的消息。
@@ -61,6 +64,8 @@ export function createCollector(ctx, options = {}) {
   const pending = new Map()
   /** 审批 id → 审批问题，等审批结果回来时补齐。 */
   const approvals = new Map()
+  /** `会话 id + 轮次` → 该轮跑过的最大步号。 */
+  const stepsOfTurn = new Map()
 
   /**
    * 取会话标识；不同版本字段名不一致，取不到就留 null，不猜。
@@ -126,11 +131,15 @@ export function createCollector(ctx, options = {}) {
         name: plugin.moduleName,
         action,
         reason: reason ?? null,
+        boot: BOOT,
         pluginId: plugin.host ? 'builtin' : `pkg:${packageOf(plugin.moduleName)}`,
         confidence: 'high',
       })
     }
   }
+
+  // 一次 DSH 启动记一行：dsh 启动次数是三个分母之一。
+  write({ ts: clock(), kind: 'boot', boot: BOOT })
 
   // 工具调用开始：只记下身份与时间，归属等结果回来再算。
   ctx.on('tools/pre-execute', (exec, next) => {
@@ -175,10 +184,33 @@ export function createCollector(ctx, options = {}) {
     write(row)
   })
 
-  // 会话持久事件流：命令与审批。
+  // 会话创建：active_sessions 是显式使用率的分母。
+  ctx.on('session/created', (session) => {
+    const sessionId = sessionIdOf(session)
+    if (sessionId === null) return
+    write({ ts: clock(), kind: 'session', sessionId, boot: BOOT })
+  })
+
+  // 会话持久事件流：命令、审批、步数。
   ctx.on('session/event', (session, event) => {
     const type = event?.type
     const data = event?.data
+    const sessionId = sessionIdOf(session)
+    if (type === 'step/start') {
+      // 只记每个轮次跑到的最大步号；轮次结束时落一行，步数就是它。
+      const key = `${sessionId}:${data?.turn ?? 0}`
+      const step = typeof data?.step === 'number' ? data.step : 0
+      const previous = stepsOfTurn.get(key)
+      if (previous === undefined || step > previous) stepsOfTurn.set(key, step)
+      return
+    }
+    if (type === 'turn/end') {
+      const key = `${sessionId}:${data?.turn ?? 0}`
+      const steps = stepsOfTurn.get(key) ?? 0
+      stepsOfTurn.delete(key)
+      write({ ts: clock(), kind: 'turn', sessionId, turn: data?.turn ?? null, steps })
+      return
+    }
     if (type === 'command/run') {
       const name = typeof data?.name === 'string' ? data.name : ''
       if (name === '') return

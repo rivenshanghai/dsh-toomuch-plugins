@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { createAttributor, normalize, packageOf, prefixCandidates } from '../src/attribution.js'
 import { createCollector, gestureSkills } from '../src/collect.js'
 import { createProfiler, readEvents } from '../src/profile.js'
+import { computeStats, percentile95, statsFromFile } from '../src/stats.js'
 import { createStore } from '../src/store.js'
 
 /**
@@ -323,5 +324,48 @@ assert.ok(profile.capabilities.tools.includes('my_custom_tool'), '自报的声�
 assert.ok(profile.capabilities.tools.includes('tool_b'), '观察到的名字应进能力表')
 assert.deepEqual(profile.declaredButInactive, ['my_custom_tool'], '声明了没调用的应被点出来')
 assert.ok(profile.unknown.includes('hooks'), '没有证据来源的维度应被点名')
+
+// —— 使用率统计（FR-4）——
+assert.equal(percentile95([10, 20, 30, 40, 100]), 100, 'P95 取上分位')
+assert.equal(percentile95([]), null, '没有样本时 P95 为 null')
+assert.equal(percentile95([5]), 5, '单样本就是它自己')
+
+const statRows = [
+  { ts: 1000, kind: 'boot', boot: 'b1' },
+  { ts: 1000, kind: 'session', sessionId: 's1' },
+  { ts: 1000, kind: 'session', sessionId: 's2' },
+  { ts: 1000, kind: 'turn', sessionId: 's1', turn: 1, steps: 4 },
+  { ts: 1000, kind: 'turn', sessionId: 's2', turn: 1, steps: 6 },
+  { ts: 1000, kind: 'plugin', pluginId: 'pkg:demo', boot: 'b1' },
+  // 显式：用户命令、用户手势、用户批准过的调用
+  { ts: 1000, kind: 'command', name: 'compact', pluginId: 'pkg:demo', source: 'user', sessionId: 's1' },
+  { ts: 1000, kind: 'skill', name: 'grilling', pluginId: 'pkg:demo', source: 'user-gesture', sessionId: 's1' },
+  { ts: 1000, kind: 'approval', name: 'demo_tool', callId: 'c1', outcome: 'allowed-once' },
+  { ts: 1000, kind: 'tool', name: 'demo_tool', pluginId: 'pkg:demo', callId: 'c1', sessionId: 's1', durationMs: 30 },
+  // 隐式：模型自己发起的
+  { ts: 1000, kind: 'tool', name: 'demo_tool', pluginId: 'pkg:demo', callId: 'c2', sessionId: 's2', durationMs: 10, error: true },
+  // 别的插件
+  { ts: 1000, kind: 'tool', name: 'other_tool', pluginId: 'pkg:other', callId: 'c3', sessionId: 's2', durationMs: 50 },
+]
+const stats = computeStats(statRows, { now: 2000 })
+assert.equal(stats.totals.activeSessions, 2, '活跃会话数')
+assert.equal(stats.totals.agentSteps, 10, '步骤数由轮次汇总')
+assert.equal(stats.totals.boots, 1, '启动次数')
+const demo = stats.plugins.find((plugin) => plugin.pluginId === 'pkg:demo')
+assert.equal(demo.calls, 4, '调用次数')
+assert.equal(demo.explicit, 3, '显式：命令 + 手势 + 被批准的工具')
+assert.equal(demo.implicit, 1, '隐式：模型自己发起的')
+assert.equal(demo.explicitRate, 1.5, '显式使用率 = 显式调用 / 活跃会话')
+assert.equal(demo.implicitRate, 0.1, '隐式命中率 = 隐式调用 / 步骤数')
+assert.equal(demo.survivalRate, 1, '加载存活率 = 被加载的启动 / 总启动')
+assert.equal(demo.errorRate, 0.25, '错误率')
+assert.equal(demo.p95Ms, 30, 'P95 耗时')
+assert.equal(demo.sessions, 2, '跨会话数')
+assert.equal(demo.active30d, true, '30 天内活跃')
+assert.equal(stats.plugins[0].pluginId, 'pkg:demo', '按显式使用率排序')
+// 统计能从文件读出来
+const statsFile = join(profileDir, 'stats-events.jsonl')
+writeFileSync(statsFile, statRows.map((row) => JSON.stringify(row)).join('\n') + '\n')
+assert.equal(statsFromFile(statsFile, { now: 2000 }).totals.calls, 5, '从文件算统计')
 
 console.log('smoke: 全部断言通过')

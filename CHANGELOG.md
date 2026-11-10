@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## Unreleased / 未发布
+
+### Added / 新增
+
+- **Plugin usage analysis entry in the sidebar footer** — a bar-chart icon sits left of the 「插件操作记录」 clock icon. Clicking it opens a **full page in the main workspace area**, not a popup. The page itself lives in the new `packages/dsh-plugin-insight` bundle; this bundle only asks for it over a window event, and the button only appears once that bundle's client half announces itself — so a user without the insight bundle sees two buttons instead of a dead third one. / **侧栏底部的插件使用率分析入口** —— 「插件操作记录」时钟图标左边多一个柱状图标，点开的是**主工作区的整页**，不是弹窗。页面本身在新拆出的 `packages/dsh-plugin-insight` 包里，本包只通过窗口事件请求它；并且对方的 client 半边宣布就绪之后本包才显示这个按钮——没装 insight 包的人看到的是两个按钮，而不是一个点不动的第三个。
+
 ## 0.4.0 (2026-11-09)
 
 ### Added / 新增
