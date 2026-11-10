@@ -137,7 +137,10 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots', 'locale', 'remote'],
+      // `layout` must be injected: it is what switches the workspace to this
+      // page. Without it `ctx.layout` is undefined and the page silently never
+      // opens — the exact bug this list exists to prevent.
+      inject: ['slots', 'locale', 'remote', 'layout'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { zh: ZH, en: EN }), 'dsh-plugin-insight: dictionaries')
         const t = ctx.locale.bind(NS)
@@ -146,8 +149,9 @@ window.__ModuleLoader__.load({
         const openPage = () => {
           try {
             ctx.layout?.selectPanel?.(PAGE_KEY)
-          } catch {
-            // The page simply does not open; everything else still works.
+          } catch (error) {
+            // 不静默：切页失败时说一声，否则「点了没反应」无从排查。
+            console.warn('[dsh-plugin-insight] 无法切换到使用率页面（宿主布局服务拒绝了这次切页）', error)
           }
         }
         // Tell the world this half is up, so the sidebar button can appear.

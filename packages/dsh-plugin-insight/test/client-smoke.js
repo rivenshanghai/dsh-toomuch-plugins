@@ -55,7 +55,11 @@ const mod = loaded.factory((name) => {
   assert.strictEqual(name, 'react', '意外的 require: ' + name)
   return React
 })
-assert.deepStrictEqual(mod.inject, ['slots', 'locale', 'remote'], '注入的宿主面')
+assert.deepStrictEqual(
+  mod.inject,
+  ['slots', 'locale', 'remote', 'layout'],
+  '注入的宿主面（layout 缺了就点不开整页）',
+)
 
 // --- 宿主桩 ---------------------------------------------------------------
 const registrations = []
@@ -78,8 +82,12 @@ const statsPayload = {
   ],
 }
 const fakeRpc = { stats: async () => ({ ok: true, value: statsPayload }) }
+const selectedPanels = []
 const ctx = {
   effect: (fn) => { fn(); return () => {} },
+  // 宿主布局服务：切页就靠它。桩里必须真的记下来，否则「点了没反应」这种
+  // bug 会一路溜过去——那正是当初注入列表漏写 layout 时的症状。
+  layout: { selectPanel: (id) => selectedPanels.push(id) },
   slots: {
     inject: (name, fn) => { injected.push(name); fn() },
     register: (entry, component) => { registrations.push({ entry, component }); return () => {} },
@@ -98,6 +106,11 @@ mod.apply(ctx)
 // --- 就绪广播 -------------------------------------------------------------
 assert.ok(window.__dshPluginInsightReady === true, 'client 半边起来后置就绪标记')
 assert.ok(dispatched.includes('dsh-plugin-insight:ready'), '广播就绪事件')
+
+// --- 侧栏按钮那一下必须真的把主工作区切过来 -------------------------------
+assert.deepStrictEqual(selectedPanels, [], '没人点之前不切页')
+window.dispatchEvent(new CustomEvent('dsh-plugin-insight:open-usage'))
+assert.deepStrictEqual(selectedPanels, ['plugin-insight-usage'], '收到 open 事件后切到整页')
 
 // --- main 槽 --------------------------------------------------------------
 assert.ok(injected.includes('main'), '注入 main 槽')
