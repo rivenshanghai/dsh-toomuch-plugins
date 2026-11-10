@@ -1,0 +1,7 @@
+# dsh-plugin-insight bundle layer.
+#
+# 只有一个宿主行：采集 + 归属解析。没有 client 半边——它不渲染任何界面，
+# 只在本地落盘事件流并对内提供只读的归属查询。
+- insert:
+    - id: plugin-insight
+      name: dsh-plugin-insight

@@ -1,0 +1,38 @@
+{
+  "name": "dsh-plugin-insight",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "采集 DSH 运行时事件，解析「这一次调用属于哪个插件」",
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "attribution",
+    "analytics"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "src/index.js",
+    "src/attribution.js",
+    "src/collect.js",
+    "src/store.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rivenshanghai/dsh-toomuch-plugins.git"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
