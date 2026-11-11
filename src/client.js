@@ -231,10 +231,10 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
 .dsh-spc-histRow{align-items:center;gap:10px;display:flex;min-height:36px;padding:5px 8px;border-radius:8px;}
 .dsh-spc-histRow:nth-child(odd){background:var(--dsw-alias-bg-layer-2);}
 .dsh-spc-histBadge{flex:none;width:28px;height:28px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;}
-.dsh-spc-histBadge.dsh-spc-aInstall{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 16%,transparent);}
-.dsh-spc-histBadge.dsh-spc-aRemove{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 16%,transparent);}
-.dsh-spc-histBadge.dsh-spc-aEnable{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 16%,transparent);}
-.dsh-spc-histBadge.dsh-spc-aDisable{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 16%,transparent);}
+.dsh-spc-histBadge.dsh-spc-ainstall{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 16%,transparent);}
+.dsh-spc-histBadge.dsh-spc-aremove{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 16%,transparent);}
+.dsh-spc-histBadge.dsh-spc-aenable{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 16%,transparent);}
+.dsh-spc-histBadge.dsh-spc-adisable{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 16%,transparent);}
 .dsh-spc-histName{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:600;}
 .dsh-spc-histTime{flex:none;color:var(--dsw-alias-label-secondary);font-size:13px;}
 .dsh-spc-histEmpty{color:var(--dsw-alias-label-secondary);padding:18px 6px;text-align:center;}

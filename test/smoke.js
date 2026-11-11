@@ -310,16 +310,24 @@ const histRule = (selector) => {
 }
 assert.ok(histRule('.dsh-spc-histName').includes('font-size:14px'), 'the plugin name is large')
 assert.ok(histRule('.dsh-spc-histTime').includes('font-size:13px'), 'the time is large')
-// Install and enable are green; remove and disable are red.
+// Install and enable are green; remove and disable are red. The selector is
+// built from the class the row actually carries, so a case mismatch between
+// the markup and the stylesheet fails here instead of painting nothing.
 const badgeColour = (action) => {
-  // The class is `dsh-spc-a` plus the capitalised action.
-  const rule = histRule('.dsh-spc-histBadge.dsh-spc-a' + action.charAt(0).toUpperCase() + action.slice(1))
+  const className = 'dsh-spc-histBadge dsh-spc-a' + action
+  assert.ok(histCss.includes('.' + className.split(' ').join('.') + '{'), 'the stylesheet has a rule for ' + className)
+  const rule = histRule('.' + className.split(' ').join('.'))
   return /error-primary/.test(rule) ? 'red' : /success-primary/.test(rule) ? 'green' : 'other'
 }
 assert.strictEqual(badgeColour('install'), 'green', 'install is green')
 assert.strictEqual(badgeColour('enable'), 'green', 'enable is green')
 assert.strictEqual(badgeColour('remove'), 'red', 'remove is red')
 assert.strictEqual(badgeColour('disable'), 'red', 'disable is red')
+// The rendered badge carries exactly that class, so the rule above applies.
+assert.ok(
+  String(badge.props.className).includes('dsh-spc-ainstall'),
+  'the rendered badge uses the class the stylesheet matches',
+)
 
 // Flatten a rendered tree into a node list (the react stub returns plain
 // {type, props, children} nodes).
