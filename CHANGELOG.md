@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added / 新增
 
-- **Plugin usage analysis** — a full page in the main workspace area (not a popup), living in the `packages/dsh-plugin-insight` bundle: the collector layer, the attribution layer and the page itself are all in place. **The sidebar entry is hidden for now** — the icon is not rendered, so the bundle stays reachable only from code until the entry's shape is settled. / **插件使用率分析** —— 主工作区的一整页（不是弹窗），代码在 `packages/dsh-plugin-insight` 包里：采集层、归属解析层与页面都已就位。**侧栏入口暂时隐藏** —— 图标不再渲染，这个包暂时只能由代码触达，等入口的形式定下来再打开。
+- **Plugin usage analysis** — a full page in the main workspace area (not a popup), living in the `packages/dsh-plugin-insight` bundle: the collector layer, the attribution layer and the page itself are all in place. The sidebar entry sits next to the 「插件操作记录」 icon and only shows once that bundle's client half announces itself; **it is hidden while the grid display is on**, because the grid is the plugin's own icon layout and the extra entry only gets in the way there. / **插件使用率分析** —— 主工作区的一整页（不是弹窗），代码在 `packages/dsh-plugin-insight` 包里：采集层、归属解析层与页面都已就位。侧栏入口在「插件操作记录」图标旁边，只有对方的 client 半边宣布就绪之后才出现；**开着网格显示时它不出现** —— 网格是本插件自己的图标布局，多一个入口只会添乱。
 
 ## 0.3.2 (2026-11-12)
 

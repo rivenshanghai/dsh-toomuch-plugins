@@ -122,6 +122,7 @@ const KEYS = [
   'orderTitle', 'orderPick', 'orderHint', 'orderEmpty', 'orderUp', 'orderDown', 'orderRemove',
   'history', 'historyTitle', 'tabInstallRemove', 'tabEnableDisable', 'historyEmpty', 'historyUnavailable',
   'close', 'actionInstall', 'actionRemove', 'actionEnable', 'actionDisable',
+  'usage',
 ]
 assert.deepStrictEqual(Object.keys(dicts.sidebarPanelCollapse.zh).sort(), [...KEYS].sort(), 'zh keys')
 assert.deepStrictEqual(Object.keys(dicts.sidebarPanelCollapse.en).sort(), [...KEYS].sort(), 'en keys')
@@ -170,9 +171,9 @@ const histBtn = footerButtons[1]
 assert.strictEqual(histBtn.props.className, 'dsh-spc-histBtn', 'activity icon button')
 assert.strictEqual(histBtn.props['aria-label'], 't:history', 'activity icon is labelled')
 
-// The plugin usage page lives in the dsh-plugin-insight bundle; its entry in
-// the sidebar is hidden for now (the bundle and its page stay, the button
-// does not), so the footer keeps exactly two buttons.
+// The usage page lives in the dsh-plugin-insight bundle, so its button only
+// shows up once that bundle's client half announces itself. Until then the
+// footer keeps its two buttons — a dead button is worse than no button.
 const footerSlots = []
 let footerHook = 0
 const renderFooter = () => { footerHook = 0; return footer.component({ t, wide: true }) }
@@ -186,13 +187,35 @@ effects.length = 0
 renderFooter()
 const footerEffects = effects.slice()
 for (const effect of footerEffects) effect()
-const afterReady = renderFooter().children.filter((c) => c !== null && c !== undefined && c.type === 'button')
-assert.strictEqual(afterReady.length, 2, 'the usage entry stays hidden: toggle plus activity icon')
-window.dispatchEvent(new CustomEvent('dsh-plugin-insight:ready'))
-const stillTwo = renderFooter().children.filter((c) => c !== null && c !== undefined && c.type === 'button')
-assert.strictEqual(stillTwo.length, 2, 'the other bundle announcing itself does not bring the entry back')
-React.useState = realFooterUseState
+const beforeReady = renderFooter().children.filter((c) => c !== null && c !== undefined && c.type === 'button')
+assert.strictEqual(beforeReady.length, 2, 'no usage button before the other bundle is up')
 
+window.dispatchEvent(new CustomEvent('dsh-plugin-insight:ready'))
+const afterReady = renderFooter().children.filter((c) => c !== null && c !== undefined && c.type === 'button')
+assert.strictEqual(afterReady.length, 3, 'usage button appears once its bundle is up')
+const usageBtn = afterReady[2]
+assert.strictEqual(usageBtn.props.className, 'dsh-spc-histBtn', 'usage button sits next to the activity icon')
+assert.strictEqual(usageBtn.props['aria-label'], 't:usage', 'usage button is labelled')
+assert.strictEqual(usageBtn.children[0].children[0].type, 'svg', 'usage button is an icon, not text')
+// Clicking it asks the other bundle to open its page — it does not open a
+// popup itself.
+usageBtn.props.onClick()
+assert.ok(
+  dispatchedEvents.includes('dsh-plugin-insight:open-usage'),
+  'clicking asks the usage page to open',
+)
+
+// Grid mode owns the sidebar's icon layout, so the usage entry is hidden
+// there; in the plain list it stays.
+store.set('dsh.sidebar-panel-collapse.display', JSON.stringify({ grid: true, columns: 3, collapsedCount: 0, collapsedRows: 0, order: [], iconSize: 'md' }))
+footerSlots[1] = undefined // re-read the preferences, keep the announced state
+const inGrid = renderFooter().children.filter((c) => c !== null && c !== undefined && c.type === 'button')
+assert.strictEqual(inGrid.length, 2, 'grid mode hides the usage entry: toggle plus activity icon')
+store.set('dsh.sidebar-panel-collapse.display', JSON.stringify({ grid: false, columns: 3, collapsedCount: 0, collapsedRows: 0, order: [], iconSize: 'md' }))
+footerSlots[1] = undefined
+const backToList = renderFooter().children.filter((c) => c !== null && c !== undefined && c.type === 'button')
+assert.strictEqual(backToList.length, 3, 'leaving grid mode brings the usage entry back')
+React.useState = realFooterUseState
 
 // The layer must claim a whole line of the shared footer row. Shrinking it to
 // content slides a neighbouring footer action in beside the toggle, and a row
