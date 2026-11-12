@@ -41,12 +41,9 @@ DSH Web 左侧栏从上到下是：品牌行 → 新会话 → **全局面板入
 - **点击计数**：面板入口被点击时，客户端把 id 报给自己的 Host 半边
   （手写 Typert 远程调用 `spcClicks.recordClick`），落盘到
   `~/.dsh/plugins/dsh-toomuch-plugins/click-counts.json`。
-- **使用率分析入口**：底部「插件操作记录」图标左边多一个柱状图标，点开的是
-  **主工作区的整页**（不是弹窗）。页面本身不在这个包里——它在
-  `packages/dsh-plugin-insight` 的 client 半边。两边只靠窗口事件耦合：
-  按钮 `dispatch` 一个 open 事件，对方收到后调 `ctx.layout.selectPanel(...)` 切到
-  那一页；对方起来时 `dispatch` 就绪事件，本包的按钮**收到就绪事件后才显示**，
-  所以没装 insight 包的人看到的是两个按钮，而不是一个点不动的死按钮。
+- **使用率分析**：页面本身不在这个包里——它在 `packages/dsh-plugin-insight` 的
+  client 半边（整页，不是弹窗）。**侧栏里的入口图标暂时隐藏**（0.3.2 起）：页面、
+  采集层与归属解析层都留着，等入口的形式定下来再打开。
 
 不做（有意为之）：
 
