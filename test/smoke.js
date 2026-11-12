@@ -218,6 +218,13 @@ assert.ok(
   footerRule('.dsh-spc-histBtn').includes('flex:none'),
   'the icon keeps its size next to the toggle',
 )
+// Since DSH v0.2.2-rc.2 every panel row carries an extra "unpin" button that
+// appears on hover. In grid mode it sits on top of the icon, and the grid
+// already lets the user arrange the icons — so the grid hides it.
+assert.ok(
+  footerCss.includes('nav.dsh-spc-grid>div>button:last-child:not(:first-child){display:none;}'),
+  'the grid hides DSH v0.2.2-rc.2\'s unpin button',
+)
 
 // --- the activity window --------------------------------------------------
 // Driven through its real open handler and remote call. The fake remote
@@ -524,6 +531,11 @@ assert.ok(captionHas(nodes, 'orderEmpty'), 'non-array order -> default hint')
 // FooterToggle's effect drives applyNav → applyOrder: listed panels take a
 // CSS `order` value inside the flex nav, and the collapsed limit keeps the
 // first entries *visually*, not in DOM order.
+//
+// The fake DOM models the two sidebar shapes the plugin has to survive:
+//   'old' — the panel list is a direct child of the sidebar root (≤ v0.2.2-rc.1);
+//   'new' — the panel list sits inside the scroll viewport, so the nav's
+//           parent is no longer the sidebar root (v0.2.2-rc.2).
 const mkStyle = () => ({
   display: '', order: '',
   setProperty(key, value) { if (key === 'order') this.order = value },
@@ -538,77 +550,113 @@ const mkClassList = () => {
     toggle: (c, on) => { if (on) set.add(c); else set.delete(c) },
   }
 }
-const makeNav = (labels) => {
-  const detach = (el) => {
-    const list = el.parentElement && Array.isArray(el.parentElement.children) ? el.parentElement.children : null
-    if (list === null) return
-    const at = list.indexOf(el)
-    if (at >= 0) list.splice(at, 1)
-  }
-  const insert = (parent, el, ref) => {
-    detach(el)
-    const at = ref === null || ref === undefined ? -1 : parent.children.indexOf(ref)
-    if (at >= 0) parent.children.splice(at, 0, el)
-    else parent.children.push(el)
-    el.parentElement = parent
-  }
-  const root = { children: [], insertBefore: (el, ref) => insert(root, el, ref) }
-  const nav = {
-    style: mkStyle(), classList: mkClassList(), children: [], parentElement: root,
-    get firstChild() { return nav.children.length > 0 ? nav.children[0] : null },
-    insertBefore: (el, ref) => insert(nav, el, ref),
-    querySelectorAll: (sel) => {
-      if (sel.startsWith('[') && sel.includes('data-spc-adopted')) {
-        return nav.children.filter((c) => c.hasAttribute('data-spc-adopted'))
-      }
-      if (sel.includes('[data-spc-tip]')) return []
-      return nav.children // 'button,[role=button],[data-spc-adopted]' and friends
-    },
-  }
-  nav.children = labels.map((label) => {
-    const row = {
-      style: mkStyle(), hidden: false, parentElement: nav,
-      getAttribute: (name) => (name === 'aria-label' ? label : null),
-      setAttribute: (name) => { if (name === 'data-spc-hidden') row.hidden = true },
-      removeAttribute: (name) => { if (name === 'data-spc-hidden') row.hidden = false },
-      hasAttribute: () => false,
-      matches: () => true,
-      querySelector: () => null,
+/** One simple selector: an optional tag plus optional [attr] / [attr=value]. */
+const matchesSimple = (el, sel) => {
+  const parsed = /^([a-z][a-z0-9-]*)?((?:\[[^\]]+\])*)$/i.exec(sel)
+  if (parsed === null) return false
+  const [, tag, attrsRaw] = parsed
+  if (tag !== undefined && tag !== '' && el.tag !== tag) return false
+  for (const raw of attrsRaw.match(/\[[^\]]+\]/g) ?? []) {
+    const inner = raw.slice(1, -1)
+    const eq = inner.indexOf('=')
+    if (eq < 0) {
+      if (!el.hasAttribute(inner)) return false
+      continue
     }
-    return row
-  })
-  return nav
+    const name = inner.slice(0, eq)
+    const value = inner.slice(eq + 1).replace(/^["']|["']$/g, '')
+    if (el.getAttribute(name) !== value) return false
+  }
+  return true
 }
-// A convention follower: a sidebar-root child with a `data-dsh-*-entry` attr
-// (今日值得读 / 全局搜索 / 容器 …), with attribute-name reflection for domEntryId.
-const mkEntry = (attr, label) => {
-  const flags = new Map([[attr, '']])
-  const refresh = () => { entry.attributes = [...flags.keys()].map((name) => ({ name })) }
-  const entry = {
-    style: mkStyle(), parentElement: null, hidden: false, attributes: [{ name: attr }],
+/** A tiny DOM element: attributes, children, style, classList. */
+const mkEl = (tag, attrs = {}) => {
+  const flags = new Map(Object.entries(attrs))
+  const el = {
+    tag,
+    children: [],
+    parentElement: null,
+    style: mkStyle(),
+    classList: mkClassList(),
+    get attributes() { return [...flags].map(([name, value]) => ({ name, value })) },
+    get firstChild() { return el.children.length > 0 ? el.children[0] : null },
     get nextElementSibling() {
-      const siblings = entry.parentElement === null ? [] : entry.parentElement.children
-      const at = siblings.indexOf(entry)
+      const siblings = el.parentElement === null ? [] : el.parentElement.children
+      const at = siblings.indexOf(el)
       return at >= 0 && at + 1 < siblings.length ? siblings[at + 1] : null
     },
-    getAttribute: (name) => (name === 'aria-label' ? label : flags.has(name) ? flags.get(name) : null),
-    setAttribute: (name, value) => {
-      if (name === 'data-spc-hidden') { entry.hidden = true; return }
-      flags.set(name, value === undefined ? '' : value)
-      refresh()
+    getAttribute: (name) => (flags.has(name) ? flags.get(name) : null),
+    setAttribute: (name, value) => { flags.set(name, value === undefined ? '' : value) },
+    removeAttribute: (name) => { flags.delete(name) },
+    hasAttribute: (name) => flags.has(name),
+    matches: (sel) => sel.split(',').some((part) => matchesSimple(el, part.trim())),
+    querySelector: (sel) => el.querySelectorAll(sel)[0] ?? null,
+    querySelectorAll: (sel) => {
+      if (sel === ':scope > nav') return el.children.filter((child) => child.tag === 'nav')
+      const parts = sel.split(',').map((part) => part.trim())
+      const out = []
+      const walk = (node) => {
+        for (const child of node.children) {
+          if (parts.some((part) => matchesSimple(child, part))) out.push(child)
+          walk(child)
+        }
+      }
+      walk(el)
+      return out
     },
-    removeAttribute: (name) => {
-      if (name === 'data-spc-hidden') { entry.hidden = false; return }
-      flags.delete(name)
-      refresh()
+    appendChild: (child) => el.insertBefore(child, null),
+    insertBefore: (child, ref) => {
+      const old = child.parentElement
+      if (old !== null) {
+        const at = old.children.indexOf(child)
+        if (at >= 0) old.children.splice(at, 1)
+      }
+      const at = ref === null || ref === undefined ? -1 : el.children.indexOf(ref)
+      if (at >= 0) el.children.splice(at, 0, child)
+      else el.children.push(child)
+      child.parentElement = el
+      return child
     },
-    hasAttribute: (name) => (name === 'data-spc-hidden' ? entry.hidden : flags.has(name)),
-    matches: () => false,
-    querySelector: () => null,
   }
-  return entry
+  return el
 }
-const runFooterEffect = (nav, storedOrder, collapsedCount, iconSize, grid = false) => {
+/**
+ * The sidebar column: the panel list and the footer the plugin's toggle lives
+ * in. 'old' keeps the nav a direct child of the root; 'new' nests it in the
+ * scroll viewport (root > scrollRegion > scrollArea > nav).
+ */
+const makeSidebar = (labels, shape = 'old') => {
+  const root = mkEl('div')
+  const footArea = mkEl('div')
+  const footerActions = mkEl('div')
+  const layer = mkEl('div')
+  footArea.appendChild(footerActions)
+  footerActions.appendChild(layer)
+  const nav = mkEl('nav')
+  for (const label of labels) {
+    const row = mkEl('button', { 'aria-label': label })
+    if (shape === 'new') {
+      // Since v0.2.2-rc.2 every panel row sits in a cell of its own.
+      const cell = mkEl('div')
+      cell.appendChild(row)
+      nav.appendChild(cell)
+    } else {
+      nav.appendChild(row)
+    }
+  }
+  if (shape === 'new') {
+    const scrollRegion = mkEl('div')
+    const scrollArea = mkEl('div')
+    scrollRegion.appendChild(scrollArea)
+    scrollArea.appendChild(nav)
+    root.appendChild(scrollRegion)
+  } else {
+    root.appendChild(nav)
+  }
+  root.appendChild(footArea)
+  return { root, nav, layer }
+}
+const runFooterEffect = (sidebar, storedOrder, collapsedCount, iconSize, grid = false) => {
   store.set('dsh.sidebar-panel-collapse', 'expanded') // start expanded so one click collapses
   store.set(prefsKey, JSON.stringify({
     grid, columns: 3, collapsedCount, collapsedRows: 0, order: storedOrder,
@@ -616,70 +664,90 @@ const runFooterEffect = (nav, storedOrder, collapsedCount, iconSize, grid = fals
   }))
   effects.length = 0 // only what this render captures
   const tree = footer.component({ t, wide: true })
-  const root = { parentElement: null, querySelector: (sel) => (sel === ':scope > nav' ? nav : null) }
-  tree.props.ref.current = root
+  tree.props.ref.current = sidebar.layer
   for (const effect of effects) {
     const cleanup = effect()
     if (typeof cleanup === 'function') cleanup()
   }
   tree.children.find((c) => c.type === 'button').props.onClick()
 }
-const domNav = makeNav(['插件', '市场', '日程', '容器'])
-runFooterEffect(domNav, ['market', 'plugins'], 2)
-assert.deepStrictEqual(
-  domNav.children.map((row) => row.style.order),
-  ['2', '1', '3', '3'],
-  'CSS order: listed panels sorted, the rest after them',
-)
-assert.deepStrictEqual(
-  domNav.children.map((row) => row.hidden),
-  [false, false, true, true],
-  'collapsed limit keeps the first two rows *visually*',
-)
-// Empty order list clears the overrides and falls back to DOM order.
-const domNav2 = makeNav(['插件', '市场', '日程', '容器'])
-runFooterEffect(domNav2, [], 2)
-assert.deepStrictEqual(domNav2.children.map((row) => row.style.order), ['', '', '', ''], 'empty order clears overrides')
-assert.deepStrictEqual(
-  domNav2.children.map((row) => row.hidden),
-  [false, false, true, true],
-  'without a custom order the limit uses DOM order',
-)
 
-// The icon-size choice marks the nav (default md leaves it unmarked).
-const domNav3 = makeNav(['插件', '市场'])
-runFooterEffect(domNav3, [], 2, 'lg')
-assert.ok(domNav3.classList.contains('dsh-spc-size-lg'), 'large -> lg marker class')
-assert.ok(!domNav3.classList.contains('dsh-spc-size-sm'), 'large -> no sm class')
-runFooterEffect(domNav3, [], 2, 'sm')
-assert.ok(domNav3.classList.contains('dsh-spc-size-sm'), 'small -> sm marker class')
-assert.ok(!domNav3.classList.contains('dsh-spc-size-lg'), 'small -> no lg class')
-runFooterEffect(domNav3, [], 2, 'md')
-assert.ok(
-  !domNav3.classList.contains('dsh-spc-size-sm') && !domNav3.classList.contains('dsh-spc-size-lg'),
-  'medium -> both markers removed (sidebar default size)',
-)
+// The same expectations hold for both sidebar shapes.
+for (const shape of ['old', 'new']) {
+  const dom = makeSidebar(['插件', '市场', '日程', '容器'], shape)
+  runFooterEffect(dom, ['market', 'plugins'], 2)
+  assert.deepStrictEqual(
+    dom.nav.children.map((cell) => cell.style.order),
+    ['2', '1', '3', '3'],
+    `CSS order: listed panels sorted, the rest after them (${shape})`,
+  )
+  assert.deepStrictEqual(
+    dom.nav.children.map((cell) => cell.hasAttribute('data-spc-hidden')),
+    [false, false, true, true],
+    `collapsed limit keeps the first two rows *visually* (${shape})`,
+  )
+  // Empty order list clears the overrides and falls back to DOM order.
+  const dom2 = makeSidebar(['插件', '市场', '日程', '容器'], shape)
+  runFooterEffect(dom2, [], 2)
+  assert.deepStrictEqual(
+    dom2.nav.children.map((cell) => cell.style.order),
+    ['', '', '', ''],
+    `empty order clears overrides (${shape})`,
+  )
+  assert.deepStrictEqual(
+    dom2.nav.children.map((cell) => cell.hasAttribute('data-spc-hidden')),
+    [false, false, true, true],
+    `without a custom order the limit uses DOM order (${shape})`,
+  )
+
+  // The icon-size choice marks the nav (default md leaves it unmarked).
+  const dom3 = makeSidebar(['插件', '市场'], shape)
+  runFooterEffect(dom3, [], 2, 'lg')
+  assert.ok(dom3.nav.classList.contains('dsh-spc-size-lg'), `large -> lg marker class (${shape})`)
+  assert.ok(!dom3.nav.classList.contains('dsh-spc-size-sm'), `large -> no sm class (${shape})`)
+  runFooterEffect(dom3, [], 2, 'sm')
+  assert.ok(dom3.nav.classList.contains('dsh-spc-size-sm'), `small -> sm marker class (${shape})`)
+  assert.ok(!dom3.nav.classList.contains('dsh-spc-size-lg'), `small -> no lg class (${shape})`)
+  runFooterEffect(dom3, [], 2, 'md')
+  assert.ok(
+    !dom3.nav.classList.contains('dsh-spc-size-sm') && !dom3.nav.classList.contains('dsh-spc-size-lg'),
+    `medium -> both markers removed (sidebar default size) (${shape})`,
+  )
+
+  // The grid mode is what broke in v0.2.2-rc.2: the nav has to be found in
+  // its new home (inside the scroll viewport) and marked from there.
+  const domGrid = makeSidebar(['插件', '市场'], shape)
+  runFooterEffect(domGrid, [], 2, 'md', true)
+  assert.ok(domGrid.nav.classList.contains('dsh-spc-grid'), `grid mode marks the nav (${shape})`)
+  assert.deepStrictEqual(
+    domGrid.nav.children.map((cell) => {
+      const row = cell.tag === 'button' ? cell : cell.querySelector('button')
+      return row.getAttribute('title')
+    }),
+    ['插件', '市场'],
+    `grid mode mirrors the label into the native title (${shape})`,
+  )
+}
 
 // --- convention entries (今日值得读 / 全局搜索 / 容器 …) ------------------
 // These insert beside the nav instead of through sidebar.panellist, so they
 // only reach the dropdown (and the order) through the data-dsh-*-entry
 // convention. A custom order adopts the listed ones into the nav — where CSS
 // order can reach them — and dropping the order puts them back.
-const domNav4 = makeNav(['插件', '市场'])
-const fakeRoot = domNav4.parentElement
-const rssEntry = mkEntry('data-dsh-rss-entry', '今日值得读')
-fakeRoot.children.push(rssEntry)
-rssEntry.parentElement = fakeRoot
+const domNav4 = makeSidebar(['插件', '市场'], 'old')
+const fakeRoot = domNav4.root
+const rssEntry = mkEl('button', { 'data-dsh-rss-entry': '', 'aria-label': '今日值得读' })
+fakeRoot.appendChild(rssEntry)
 
 runFooterEffect(domNav4, ['rss', 'plugins'], 2)
-assert.strictEqual(domNav4.children[0], rssEntry, 'listed DOM entry adopted into the nav')
+assert.strictEqual(domNav4.nav.children[0], rssEntry, 'listed DOM entry adopted into the nav')
 assert.deepStrictEqual(
-  domNav4.children.map((row) => row.style.order),
+  domNav4.nav.children.map((cell) => cell.style.order),
   ['1', '2', '3'],
   'data-attr identity orders the adopted entry first',
 )
 assert.deepStrictEqual(
-  domNav4.children.map((row) => row.hidden),
+  domNav4.nav.children.map((cell) => cell.hasAttribute('data-spc-hidden')),
   [false, false, true],
   'collapsed limit sees the adopted row in visual order',
 )
@@ -716,9 +784,9 @@ assert.ok(
   'no native-select styling left',
 )
 runFooterEffect(domNav4, [], 2, 'md', true) // grid mode adopts everything
-assert.ok(domNav4.children.includes(rssEntry), 'grid adopts unlisted entries too')
+assert.ok(domNav4.nav.children.includes(rssEntry), 'grid adopts unlisted entries too')
 runFooterEffect(domNav4, [], 2) // back to a plain list with no custom order
-assert.ok(!domNav4.children.includes(rssEntry), 'empty order releases the entry')
+assert.ok(!domNav4.nav.children.includes(rssEntry), 'empty order releases the entry')
 assert.ok(fakeRoot.children.includes(rssEntry), 'released back to the sidebar root')
 
 // --- click counting -------------------------------------------------------
@@ -759,9 +827,8 @@ assert.deepStrictEqual(recorded, ['plugins'], 'panel click reported by label -> 
 // Convention entries: the id comes from a data-dsh-*-entry attribute found by
 // walking up from the click target (icons / inputs sit below the entry), and
 // only counts when the entry is part of the sidebar (the last applied root).
-const dockerEntry = mkEntry('data-dsh-docker-entry', '容器')
-fakeRoot.children.push(dockerEntry)
-dockerEntry.parentElement = fakeRoot
+const dockerEntry = mkEl('button', { 'data-dsh-docker-entry': '', 'aria-label': '容器' })
+fakeRoot.appendChild(dockerEntry)
 clickHandler({ target: { parentElement: { attributes: [{ name: 'data-dsh-docker-entry' }] } } })
 await Promise.resolve()
 assert.deepStrictEqual(recorded, ['plugins', 'docker'], 'click inside an entry reports its id')

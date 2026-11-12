@@ -188,6 +188,11 @@ nav.dsh-spc-grid{grid-template-columns:repeat(var(--dsh-spc-grid-cols,3),minmax(
 nav.dsh-spc-grid :is(button,[role=button],[data-spc-adopted]){box-sizing:border-box;justify-content:center;gap:0;margin:0;padding:7px 4px;width:100%;}
 nav.dsh-spc-grid :is(button,[role=button],[data-spc-adopted])>*:not(:first-child){display:none;}
 nav.dsh-spc-grid>div{min-width:0;}
+/* DSH v0.2.2-rc.2 起，面板行右边多了一个「取消固定」按钮（悬停出现）。网格模式
+   下本插件自己就能重排图标，那个按钮压在图标上只是噪音——网格里藏掉；列表模式
+   留着（那是 DSH 自己的功能，本插件没有替代品）。DSH 的 Tooltip 不加包装元素，
+   所以它在格子里就排在行按钮之后：「格子里的最后一个按钮」就是它。 */
+nav.dsh-spc-grid>div>button:last-child:not(:first-child){display:none;}
 nav [data-spc-hidden]{display:none;}
 /* Icon size: the row glyphs take width/height as SVG attributes (or inline
    style in third-party entries), so override with !important; the sprite
@@ -352,15 +357,64 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
     }
 
     /**
-     * The global panel list is the `<nav>` the sidebar renders as a direct child
-     * of its root; walk up from this footer button until that child appears.
-     * Returns null when the sidebar is not the shape we expect, in which case the
-     * toggle stays harmless and does nothing.
+     * 全局面板入口列表的判定：那个 `<nav>` 里装着面板行 —— 每个面板行都是带
+     * aria-label 的按钮（DSH 的 PanelRow 恒有 aria-label）。侧栏里另一个
+     * `<nav>`（设置页的分类导航）按钮上没有 aria-label，不会被误认。
+     * @param {Element|null} nav 待判定的 `<nav>`。
+     * @returns {boolean} 是否是全局面板入口列表。
+     */
+    function isPanelNav(nav) {
+      if (nav === null || nav === undefined || typeof nav.querySelector !== 'function') return false
+      return nav.querySelector('button[aria-label],[role=button][aria-label]') !== null
+    }
+
+    /**
+     * 某个子树里第一个全局面板入口列表 `<nav>`（按文档顺序）。
+     * @param {Element|null} scope 子树根。
+     * @returns {Element|null} 面板列表 `<nav>`，没有则 null。
+     */
+    function panelNavIn(scope) {
+      if (scope === null || scope === undefined || typeof scope.querySelectorAll !== 'function') return null
+      for (const nav of scope.querySelectorAll('nav')) {
+        if (isPanelNav(nav)) return nav
+      }
+      return null
+    }
+
+    /**
+     * 找到「全局面板入口列表」那个 `<nav>`。
+     *
+     * DSH v0.2.2-rc.2 把 `<nav>` 从侧栏根节点的直接子元素挪进了滚动视口
+     * （root > scrollRegion > scrollArea > nav），旧版是 root > nav。旧写法
+     * 「向上找第一个含直接子 `<nav>` 的祖先」在新结构里够不着 —— 滚动视口不
+     * 是开关的祖先 —— 网格与折叠就整体失效（安全失效：什么都不做）。
+     *
+     * 两版都认：祖先链上先看「直接子 `<nav>`」（旧结构，最强的结构信号），
+     * 同一层再看「子树里装着面板行 `<nav>`」的第一个祖先（新结构）。
+     * @param {Element} from 起点（开关自己的根节点）。
+     * @returns {Element|null} 面板列表 `<nav>`，找不到则 null。
      */
     function findPanelNav(from) {
       for (let el = from; el !== null && el !== document.body; el = el.parentElement) {
-        const nav = el.querySelector(':scope > nav')
-        if (nav !== null) return nav
+        const direct = typeof el.querySelector === 'function' ? el.querySelector(':scope > nav') : null
+        if (direct !== null && direct !== undefined && isPanelNav(direct)) return direct
+        const nested = panelNavIn(el)
+        if (nested !== null) return nested
+      }
+      return null
+    }
+
+    /**
+     * 侧栏根节点：开关往上第一个「子树里装着面板列表 `<nav>`」的祖先。
+     * 旧版它就是 `<nav>` 的父节点；v0.2.2-rc.2 起 `<nav>` 进了滚动视口，根
+     * 节点要另找 —— 绕槽插入的 data-dsh-*-entry 条目仍挂在根节点上，收养要
+     * 往那里放回。
+     * @param {Element} from 起点（开关自己的根节点）。
+     * @returns {Element|null} 侧栏根节点，找不到则 null。
+     */
+    function findSidebarRoot(from) {
+      for (let el = from; el !== null && el !== document.body; el = el.parentElement) {
+        if (panelNavIn(el) !== null) return el
       }
       return null
     }
@@ -493,12 +547,24 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
       }
     }
 
-    /** Visual rank of a row: order value of its direct child of the nav. */
-    function rowRank(nav, row) {
-      let el = row
-      while (el.parentElement !== null && el.parentElement !== nav) el = el.parentElement
-      if (el.parentElement !== nav) return 0
-      const value = Number(el.style.order)
+    /**
+     * 单元格里那一行入口的元素：格子本身就是入口（旧版，nav 的直接子元素
+     * 就是按钮），否则是格子里第一个按钮 / role=button（v0.2.2-rc.2 起 DSH
+     * 把每个面板行包进了单元格里）。
+     * @param {Element} cell `<nav>` 的一个直接子元素。
+     * @returns {Element|null} 这一行入口的元素，找不到则 null。
+     */
+    function rowOf(cell) {
+      if (cell === null || cell === undefined) return null
+      if (typeof cell.matches === 'function' && cell.matches('button,[role=button],[data-spc-adopted]')) return cell
+      if (typeof cell.querySelector === 'function') return cell.querySelector('button,[role=button],[data-spc-adopted]')
+      return null
+    }
+
+    /** 单元格上的 CSS order 数值（没设置时按 0）。 */
+    function orderOf(cell) {
+      if (cell === null || cell === undefined || typeof cell.style !== 'object' || cell.style === null) return 0
+      const value = Number(cell.style.order)
       return Number.isFinite(value) ? value : 0
     }
 
@@ -507,8 +573,10 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
       const nav = findPanelNav(rootEl)
       if (nav === null) return
       // Remember the sidebar root so DOM-entry discovery (dropdown, ordering)
-      // has a scope even before the settings page renders.
-      sidebarRoot = nav.parentElement ?? null
+      // has a scope even before the settings page renders. Since v0.2.2-rc.2
+      // the nav sits inside the scroll viewport, so its parent is no longer the
+      // root — the root is looked up separately.
+      sidebarRoot = findSidebarRoot(rootEl) ?? nav.parentElement ?? null
       panelNav = nav
       // Icon size: only sm/lg need a marker; md means "leave the sidebar's
       // own icon size alone". Re-applied on every render like the rest.
@@ -524,13 +592,18 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
           ? prefs.collapsedRows * prefs.columns
           : prefs.collapsedCount
       nav.style.display = limit === 0 ? 'none' : ''
+      // One entry per direct child of the nav: in the old sidebar that child
+      // is the row button itself, since v0.2.2-rc.2 DSH wraps every panel row
+      // in a cell — and the cell is what has to disappear, otherwise the grid
+      // keeps an empty cell per hidden row.
+      const cells = Array.from(nav.children)
       // Hide by visual order (custom display order first), not DOM order.
-      const rows = Array.from(nav.querySelectorAll('button,[role=button],[data-spc-adopted]'))
-        .map((row, domIndex) => ({ row, domIndex, rank: rowRank(nav, row) }))
+      const ranked = cells
+        .map((cell, domIndex) => ({ cell, domIndex, rank: orderOf(cell) }))
         .sort((a, b) => a.rank - b.rank || a.domIndex - b.domIndex)
-      for (const [index, { row }] of rows.entries()) {
-        if (index < limit) row.removeAttribute('data-spc-hidden')
-        else row.setAttribute('data-spc-hidden', '')
+      for (const [index, { cell }] of ranked.entries()) {
+        if (index < limit) cell.removeAttribute('data-spc-hidden')
+        else cell.setAttribute('data-spc-hidden', '')
       }
     }
 
@@ -575,7 +648,17 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
       const before = adoptedBefore.get(entry)
       entry.removeAttribute(ADOPTED_FLAG)
       adoptedBefore.delete(entry)
-      rootEl.insertBefore(entry, before != null && before.parentElement === rootEl ? before : nav)
+      // Put the entry back where it sat: before the sibling recorded at
+      // adoption time when that sibling is still in the root, otherwise in
+      // front of the nav (the old sidebar had the nav as a root child). Since
+      // v0.2.2-rc.2 the nav lives in the scroll viewport and is no longer a
+      // root child, so the entry falls back to the end of the root.
+      const ref = before != null && before.parentElement === rootEl
+        ? before
+        : nav.parentElement === rootEl
+          ? nav
+          : null
+      rootEl.insertBefore(entry, ref)
     }
 
     function releaseEntries(rootEl, nav) {
@@ -599,8 +682,10 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
       const nav = findPanelNav(rootEl)
       if (nav === null) return
       // `rootEl` here is the footer toggle itself; the injected entries are
-      // direct children of the sidebar root, which is the nav's parent.
-      const sideRoot = nav.parentElement
+      // direct children of the sidebar root. Since v0.2.2-rc.2 the nav sits
+      // inside the scroll viewport, so the root is not the nav's parent any
+      // more — look it up.
+      const sideRoot = findSidebarRoot(rootEl) ?? nav.parentElement
       const order = sanitizeOrder(prefs.order)
       const gridOn = wide && prefs.grid
       if (gridOn) {
@@ -632,7 +717,11 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
       // Rows carry their label as aria-label (the sidebar always sets one).
       // An entry that already ships its own title keeps it untouched, so the
       // cleanup pass below only removes titles this plugin itself added.
-      for (const row of nav.querySelectorAll('button,[role=button],[data-spc-adopted]')) {
+      // Since v0.2.2-rc.2 the row button sits inside a cell of the nav, so
+      // the title goes onto the row inside the cell, not onto the cell.
+      for (const cell of nav.children) {
+        const row = rowOf(cell)
+        if (row === null) continue
         if (row.hasAttribute('data-spc-tip') || row.hasAttribute('title')) continue
         const label = row.getAttribute('aria-label')
         if (label === null) continue
