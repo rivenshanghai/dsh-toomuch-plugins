@@ -8,33 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## 0.3.3 (2026-11-13)
 
-> 这一版同时带上了此前起草为 0.4.0、但从未发布也从未打 tag 的内容（插件操作记录）。
-> This release also carries what was drafted as 0.4.0 — never published, never tagged.
-
-**本次发布不提供插件使用率入口**：页面上任何地方都不显示它。后台
-（`packages/dsh-plugin-insight`）继续采集使用率数据，入口在下个版本开放。
-**This release does not ship the plugin usage entry**: nothing shows it anywhere in the
-page. The backend (`packages/dsh-plugin-insight`) keeps collecting the usage data; the
-entry opens in the next version.
-
 ### Fixed / 修复
 
 - **Grid display broke on DSH v0.2.2-rc.2** — that release moved the global-panel list into the sidebar's scroll viewport, so it now scrolls together with the workspace region. The plugin looked the list up by walking up from its footer button to the first ancestor with a **direct child** `<nav>`; in the new shape the list is not on that path at all (the scroll viewport is a sibling of the footer), so the lookup returned nothing and grid display, collapsing, the collapsed limit and the custom display order all silently did nothing — the settings page still showed the options, but nothing moved. The list is now found structurally in both shapes (a `<nav>` whose rows are labelled buttons), and the sidebar root is looked up separately, because the injected third-party entries (今日值得读 / 全局搜索 / 容器) still hang off the root rather than off the list. The new release also wraps every panel row in a cell of its own, so the collapsed limit now hides whole cells — the grid no longer keeps an empty cell per hidden row. / **DSH v0.2.2-rc.2 下网格显示失效** —— 该版本把全局面板列表挪进了侧栏的滚动视口，于是它和工作区一起滚动。本插件原先从底部开关向上回溯，找第一个含**直接子** `<nav>` 的祖先；新结构里列表根本不在这条路径上（滚动视口与底部开关是兄弟子树），查找落空，网格显示、折叠、收起限额与显示顺序**全部静默失效**——设置项还在，勾了没反应。现在两种形状都用结构判定找列表（装着带标签按钮行的 `<nav>`），侧栏根节点另找一次（绕槽插入的今日值得读 / 全局搜索 / 容器仍挂在根节点上）。该版本还把每个面板行包进了自己的格子里，收起限额因此按格子隐藏，网格里不再多出空格子。
 - **DSH v0.2.2-rc.2's hover-only pin button no longer covers the grid icons** — that release gave every panel row an extra 「从左侧栏取消固定」 button that shows up on hover. In grid mode it lands on top of the icon, and the grid already lets the user arrange the icons themselves, so the grid hides it. List mode keeps it: unpinning a panel is DSH's own feature and this plugin has no replacement for it. / **DSH v0.2.2-rc.2 的「取消固定」按钮不再压在网格图标上** —— 该版本给每个面板行加了一个悬停出现的「从左侧栏取消固定」按钮；网格模式下它正好落在图标上，而网格本身已经能让用户自己排列图标，所以网格里把它藏掉。列表模式保留：取消固定是 DSH 自己的功能，本插件没有替代品。
-
-### Added / 新增
-
-- **Plugin activity log** — the sidebar footer gains an icon right of the 「收起 / 展开全局面板」 toggle; clicking it opens a window with two tabs: 「安装/删除」 (every record) and 「启用/禁用」 (the last month). The host half reads the profile manifest every few seconds, compares it with the state it recorded last time, and writes what was installed, removed, enabled or disabled — with the plugin name and the time — to `~/.dsh/plugins/dsh-toomuch-plugins/plugin-history.json`. It compares state rather than listening for change events because a plugin can be installed or removed from the settings panel, from the plugin market or from the `dsh` CLI, and only the first of those announces what it did. Upgrades are left out: a package that disappears and comes back with another version retracts the removal it started with. / **插件操作记录** —— 侧栏底部在「收起 / 展开全局面板」按钮右侧多一个图标，点开是一个带两个标签的窗口：「安装/删除」（全量）与「启用/禁用」（最近一个月）。Host 半边每隔几秒读一次 profile 清单，和上次记下的状态比一次，把安装、删除、启用、禁用的插件名与时间写入 `~/.dsh/plugins/dsh-toomuch-plugins/plugin-history.json`。之所以比状态而不是听变更事件：插件可以从设置页、插件市场或 `dsh` 命令行装/删，其中只有设置页那条路会广播自己的动作。升级不计入：换了版本又出现的包会把刚记下的那条删除撤掉。
-
-### Fixed / 修复
-
-- **The first run listed every installed plugin** — the plugins a profile already had were recorded as installs with the scan time, so the window opened on a list of 92 rows that were never operations. The current state is now taken as the baseline the comparison starts from, and nothing is listed until something actually changes. Baseline rows written by earlier versions are dropped when the log is read. / **首次运行会把已装的插件全列出来** —— profile 里已经装着的插件被记成一次安装，时间是扫描时刻，于是窗口一打开就是 92 条根本不是操作的记录。现在直接拿当前状态作为之后比对的基线，在真的发生变化之前不列任何东西；旧版本写下的 baseline 行在读取时丢掉。
-- **An unreadable profile looked like an empty one** — if the profile manifest could not be read, the comparison saw no packages at all and recorded every installed plugin as removed. An unreadable profile is now an unknown state: nothing is written at all. / **读不到 profile 会被当成空 profile** —— 之前清单读不出来时，比对看到的是「一个包都没有」，于是把装着的插件全记成删除。现在读不到就是「不知道」，什么都不写。
-- **Records were missed entirely** — the log was built from the plugin manager's `plugin-manager/operation` event, which only the settings page emits: installing or removing from the plugin market (which shells out to the CLI) or from `dsh plugin` produced no record at all, so a removed plugin never showed up. The log is now built by comparing the profile manifest with the last recorded state, which every path updates. / **记录会整条漏掉** —— 原来靠插件管理器的 `plugin-manager/operation` 事件，而这个事件只有设置页那条路会发：在插件市场（它 shell 出去调 CLI）或 `dsh plugin` 里装/删，一条都不会记，删掉的插件永远不出现。现在改成比对 profile 清单与上次记下的状态，所有路径都会更新清单。
-
-### Changed / 变更
-
-- **Activity rows are icons, and sorted by time** — the action column no longer spells 「安装 / 删除 / 启用 / 禁用」 as text (illegible at row height); each action is a 16px stroke icon, **install and enable in green** (the power symbol), **remove and disable in red** (the power symbol with a bar through it), with an `aria-label` for screen readers. The plugin name is 14px semibold and the time 13px, both larger than the body text. Both tabs are returned newest first, by timestamp. / **操作列为图标、按时间倒序** —— 操作列不再用文字写「安装 / 删除 / 启用 / 禁用」（行高下看不清），改为 16px 线条图标并按状态色着色：**安装、启用是绿色**（电源符号），**删除、禁用是红色**（电源符号加一道斜杠），并给屏幕阅读器留 `aria-label`；插件名 14px 半粗、时间 13px，都比正文大一号；两个标签页都按时间倒序返回。
 
 ## 0.3.1 (2026-11-03)
 

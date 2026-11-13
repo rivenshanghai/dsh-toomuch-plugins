@@ -82,6 +82,12 @@ entries**, and bring it back when you need it.
   choice survives reloads.
 - **Off by default** — grid mode is opt-in; the preference lives in `localStorage`
   alongside the collapse state and survives reloads.
+- **Works with DSH v0.2.2-rc.2** — that release moved the global-panel list into
+  the sidebar's scroll viewport, so it now scrolls together with the workspace
+  region. The list is found structurally, in the old and the new shape alike, and
+  the collapsed limit counts whole cells — so the grid keeps no empty cell per
+  hidden row. DSH's hover-only 「从左侧栏取消固定」 button is hidden in grid mode
+  (it would sit on top of the icons); the list mode keeps it.
 
 ## Screenshots
 
