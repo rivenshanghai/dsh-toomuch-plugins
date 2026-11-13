@@ -6,22 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## Unreleased / 未发布
-
-### Added / 新增
-
-- **Plugin usage analysis** — a full page in the main workspace area (not a popup), living in the `packages/dsh-plugin-insight` bundle: the collector layer, the attribution layer and the page itself are all in place. The sidebar entry sits next to the 「插件操作记录」 icon and only shows once that bundle's client half announces itself; **it is hidden while the grid display is on**, because the grid is the plugin's own icon layout and the extra entry only gets in the way there. / **插件使用率分析** —— 主工作区的一整页（不是弹窗），代码在 `packages/dsh-plugin-insight` 包里：采集层、归属解析层与页面都已就位。侧栏入口在「插件操作记录」图标旁边，只有对方的 client 半边宣布就绪之后才出现；**开着网格显示时它不出现** —— 网格是本插件自己的图标布局，多一个入口只会添乱。
-
-## 0.3.2 (2026-11-12)
+## 0.3.3 (2026-11-13)
 
 > 这一版同时带上了此前起草为 0.4.0、但从未发布也从未打 tag 的内容（插件操作记录）。
 > This release also carries what was drafted as 0.4.0 — never published, never tagged.
+
+**本次发布不提供插件使用率入口**：页面上任何地方都不显示它。后台
+（`packages/dsh-plugin-insight`）继续采集使用率数据，入口在下个版本开放。
+**This release does not ship the plugin usage entry**: nothing shows it anywhere in the
+page. The backend (`packages/dsh-plugin-insight`) keeps collecting the usage data; the
+entry opens in the next version.
 
 ### Fixed / 修复
 
 - **Grid display broke on DSH v0.2.2-rc.2** — that release moved the global-panel list into the sidebar's scroll viewport, so it now scrolls together with the workspace region. The plugin looked the list up by walking up from its footer button to the first ancestor with a **direct child** `<nav>`; in the new shape the list is not on that path at all (the scroll viewport is a sibling of the footer), so the lookup returned nothing and grid display, collapsing, the collapsed limit and the custom display order all silently did nothing — the settings page still showed the options, but nothing moved. The list is now found structurally in both shapes (a `<nav>` whose rows are labelled buttons), and the sidebar root is looked up separately, because the injected third-party entries (今日值得读 / 全局搜索 / 容器) still hang off the root rather than off the list. The new release also wraps every panel row in a cell of its own, so the collapsed limit now hides whole cells — the grid no longer keeps an empty cell per hidden row. / **DSH v0.2.2-rc.2 下网格显示失效** —— 该版本把全局面板列表挪进了侧栏的滚动视口，于是它和工作区一起滚动。本插件原先从底部开关向上回溯，找第一个含**直接子** `<nav>` 的祖先；新结构里列表根本不在这条路径上（滚动视口与底部开关是兄弟子树），查找落空，网格显示、折叠、收起限额与显示顺序**全部静默失效**——设置项还在，勾了没反应。现在两种形状都用结构判定找列表（装着带标签按钮行的 `<nav>`），侧栏根节点另找一次（绕槽插入的今日值得读 / 全局搜索 / 容器仍挂在根节点上）。该版本还把每个面板行包进了自己的格子里，收起限额因此按格子隐藏，网格里不再多出空格子。
 - **DSH v0.2.2-rc.2's hover-only pin button no longer covers the grid icons** — that release gave every panel row an extra 「从左侧栏取消固定」 button that shows up on hover. In grid mode it lands on top of the icon, and the grid already lets the user arrange the icons themselves, so the grid hides it. List mode keeps it: unpinning a panel is DSH's own feature and this plugin has no replacement for it. / **DSH v0.2.2-rc.2 的「取消固定」按钮不再压在网格图标上** —— 该版本给每个面板行加了一个悬停出现的「从左侧栏取消固定」按钮；网格模式下它正好落在图标上，而网格本身已经能让用户自己排列图标，所以网格里把它藏掉。列表模式保留：取消固定是 DSH 自己的功能，本插件没有替代品。
-
 
 ### Added / 新增
 
