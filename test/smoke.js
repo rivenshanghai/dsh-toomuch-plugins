@@ -51,7 +51,11 @@ const mod = loaded.factory((name) => {
   assert.strictEqual(name, 'react', 'unexpected require: ' + name)
   return React
 })
-assert.deepStrictEqual(mod.inject, ['slots', 'locale', 'remote'], 'inject faces')
+assert.deepStrictEqual(
+  mod.inject,
+  ['slots', 'locale', 'remote', 'contextMenus', 'workspaces', 'sessions'],
+  'inject faces',
+)
 
 // --- fake ctx -------------------------------------------------------------
 // document stub so the plugin can register its click listener.
@@ -66,11 +70,32 @@ const injected = []
 const contributions = []
 const recorded = []
 const fakeRpc = { recordClick: async (id) => { recorded.push(id); return { ok: true, value: recorded.length } } }
+// Workspace favorites live in the host half; the client only mirrors them.
+const favoriteCalls = []
+let favoritePaths = []
+const fakeFavoritesRpc = {
+  list: async () => ({ ok: true, value: { paths: favoritePaths } }),
+  toggle: async (path) => {
+    favoriteCalls.push(path)
+    favoritePaths = favoritePaths.includes(path)
+      ? favoritePaths.filter((p) => p !== path)
+      : [...favoritePaths, path]
+    return { ok: true, value: { paths: favoritePaths } }
+  },
+}
+// 右键菜单贡献由插件注册进宿主的 contextMenus 服务。
+const menuContributions = []
 const ctx = {
   effect: (fn) => fn(),
   locale: {
     register: (ns, dict) => { dicts[ns] = dict },
-    bind: (ns) => (key) => `${ns}.${key}`,
+    bind: (ns) => (key, params) => `${ns}.${key}` + (params === undefined ? '' : JSON.stringify(params)),
+  },
+  contextMenus: {
+    register: (contribution) => {
+      menuContributions.push(contribution)
+      return () => {}
+    },
   },
   slots: {
     inject: (slot, get) => { injected.push(slot); get() },
@@ -90,7 +115,12 @@ const ctx = {
       return () => {}
     },
   },
-  get: (name) => (name === 'remote.spcClicks' ? fakeRpc : undefined),
+  get: (name) =>
+    name === 'remote.spcClicks'
+      ? fakeRpc
+      : name === 'remote.spcFavorites'
+        ? fakeFavoritesRpc
+        : undefined,
 }
 mod.apply(ctx)
 
@@ -101,6 +131,7 @@ const KEYS = [
   'orderTitle', 'orderPick', 'orderHint', 'orderEmpty', 'orderUp', 'orderDown', 'orderRemove',
   'history', 'historyTitle', 'tabInstallRemove', 'tabEnableDisable', 'historyEmpty', 'historyUnavailable',
   'close', 'actionInstall', 'actionRemove', 'actionEnable', 'actionDisable',
+  'favorite', 'filterFavorites', 'filterRecent', 'filterLatest', 'recentDays', 'latestCount', 'filterHint',
 ]
 assert.deepStrictEqual(Object.keys(dicts.sidebarPanelCollapse.zh).sort(), [...KEYS].sort(), 'zh keys')
 assert.deepStrictEqual(Object.keys(dicts.sidebarPanelCollapse.en).sort(), [...KEYS].sort(), 'en keys')
@@ -108,7 +139,7 @@ assert.deepStrictEqual(Object.keys(dicts.sidebarPanelCollapse.en).sort(), [...KE
 // Both slots register exactly once, with the expected metadata.
 assert.deepStrictEqual(
   injected.sort(),
-  ['settings.plugins.tab', 'shell.overlay', 'sidebar.footer.action'],
+  ['contextMenu.icon', 'settings.plugins.tab', 'shell.overlay', 'sidebar.footer.action'],
   'slots injected',
 )
 const footer = registrations.find((r) => r.entry.name === 'sidebar.footer.action')
@@ -223,7 +254,14 @@ const fakeHistory = {
     }
   },
 }
-ctx.get = (name) => (name === 'remote.spcHistory' ? fakeHistory : name === 'remote.spcClicks' ? fakeRpc : undefined)
+ctx.get = (name) =>
+  name === 'remote.spcHistory'
+    ? fakeHistory
+    : name === 'remote.spcClicks'
+      ? fakeRpc
+      : name === 'remote.spcFavorites'
+        ? fakeFavoritesRpc
+        : undefined
 // The mount settles on a microtask; give it a tick before driving the window.
 await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -355,7 +393,7 @@ const checkbox = nodes.find((n) => n.type === 'input')
 checkbox.props.onChange({ target: { checked: true } })
 assert.deepStrictEqual(
   JSON.parse(store.get(prefsKey)),
-  { grid: true, columns: 3, collapsedCount: 0, collapsedRows: 0, order: [], iconSize: 'md' },
+  { grid: true, columns: 3, collapsedCount: 0, collapsedRows: 0, order: [], iconSize: 'md', favoritesOnly: false, recentOnly: false, latestOnly: false, recentDays: 7, latestCount: 3 },
   'writePrefs',
 )
 nodes = renderTab()
@@ -371,13 +409,13 @@ assert.deepStrictEqual(rowPick.map((n) => n.props['aria-pressed']), [true, false
 cols.find((n) => n.children[0] === '4').props.onClick()
 assert.deepStrictEqual(
   JSON.parse(store.get(prefsKey)),
-  { grid: true, columns: 4, collapsedCount: 0, collapsedRows: 0, order: [], iconSize: 'md' },
+  { grid: true, columns: 4, collapsedCount: 0, collapsedRows: 0, order: [], iconSize: 'md', favoritesOnly: false, recentOnly: false, latestOnly: false, recentDays: 7, latestCount: 3 },
   'columns=4 persisted',
 )
 pickButtons(renderTab(), 'collapsedRows').find((n) => n.children[0] === '2').props.onClick()
 assert.deepStrictEqual(
   JSON.parse(store.get(prefsKey)),
-  { grid: true, columns: 4, collapsedCount: 0, collapsedRows: 2, order: [], iconSize: 'md' },
+  { grid: true, columns: 4, collapsedCount: 0, collapsedRows: 2, order: [], iconSize: 'md', favoritesOnly: false, recentOnly: false, latestOnly: false, recentDays: 7, latestCount: 3 },
   'collapsedRows=2 persisted',
 )
 store.set(prefsKey, '{"grid":true,"columns":9,"collapsedRows":9}')
@@ -1021,6 +1059,182 @@ fs.rmSync(legacyHome, { recursive: true, force: true })
 
 fs.rmSync(tmpHome, { recursive: true, force: true })
 delete process.env.DSH_HOME
+
+// --- 0.4.0: 工作区收藏与三个筛选开关 -----------------------------------------
+// 筛选是纯计算（不碰 DOM），直接断言：越界回默认、三个开关按「与」组合、
+// 父项目被筛掉时子项目跟着隐藏。
+const filter = mod.filter
+assert.deepStrictEqual(
+  filter.sanitizeFilterPrefs({}),
+  { favoritesOnly: false, recentOnly: false, latestOnly: false, recentDays: 7, latestCount: 3 },
+  'filter defaults: off / 7 days / 3 projects',
+)
+assert.deepStrictEqual(
+  filter.sanitizeFilterPrefs({ favoritesOnly: 'yes', recentDays: 0, latestCount: 42, recentOnly: 1 }),
+  { favoritesOnly: false, recentOnly: false, latestOnly: false, recentDays: 7, latestCount: 3 },
+  'dirty filter values fall back to the defaults',
+)
+assert.strictEqual(filter.sanitizeFilterPrefs({ recentDays: 99 }).recentDays, 99, '99 days is the ceiling')
+assert.strictEqual(filter.sanitizeFilterPrefs({ latestCount: 9 }).latestCount, 9, '9 projects is the ceiling')
+
+const DAY = 24 * 60 * 60 * 1000
+const NOW = 1_800_000_000_000
+// 平铺的四个项目：最后会话分别是 30 天前、1 天前、今天、从来没有会话。
+const projects = [
+  { workspaceId: 'w-old', path: '/old', sessionIds: ['s-old'] },
+  { workspaceId: 'w-recent', path: '/recent', sessionIds: ['s-new'] },
+  { workspaceId: 'w-today', path: '/today', sessionIds: ['s-today'] },
+  { workspaceId: 'w-bare', path: '/other', sessionIds: [] },
+]
+const summaries = {
+  's-old': { updatedAt: NOW - 30 * DAY },
+  's-new': { updatedAt: NOW - 1 * DAY },
+  's-today': { updatedAt: NOW },
+}
+assert.deepStrictEqual(
+  [...filter.lastActivityByWorkspace(projects, summaries)],
+  [['w-old', NOW - 30 * DAY], ['w-recent', NOW - 1 * DAY], ['w-today', NOW], ['w-bare', 0]],
+  'a project activity is its last session time; no session is 0',
+)
+
+const visible = (prefs, favorites = [], items = projects) =>
+  [...filter.visibleWorkspaceIds(items, summaries, favorites, prefs, NOW)]
+assert.deepStrictEqual(visible({ favoritesOnly: true }, ['/other']), ['w-bare'], 'favorites only keeps the starred project')
+assert.deepStrictEqual(
+  visible({ favoritesOnly: true, recentOnly: true }, ['/other']),
+  [],
+  'the switches combine with AND: starred but not recent shows nothing',
+)
+assert.deepStrictEqual(
+  visible({ recentOnly: true, recentDays: 7 }),
+  ['w-recent', 'w-today'],
+  'recent keeps projects active within n days (a project without sessions is out)',
+)
+assert.deepStrictEqual(
+  visible({ recentOnly: true, recentDays: 40 }),
+  ['w-old', 'w-recent', 'w-today'],
+  'a larger window reaches the older project',
+)
+assert.deepStrictEqual(visible({ latestOnly: true, latestCount: 1 }), ['w-today'], 'latest keeps the most recent m projects')
+assert.deepStrictEqual(
+  visible({ latestOnly: true, latestCount: 3 }),
+  ['w-old', 'w-recent', 'w-today'],
+  'm projects by last activity',
+)
+
+// 工作区树（嵌套项目）：父是路径前缀目录，父子必须一起在场。
+const nested = [
+  { workspaceId: 'w-root', path: '/repo', sessionIds: ['s-old'] },
+  { workspaceId: 'w-sub', path: '/repo/sub', sessionIds: ['s-today'] },
+]
+assert.strictEqual(filter.ancestorWorkspace(nested[1], nested)?.workspaceId, 'w-root', 'a nested project knows its parent')
+assert.strictEqual(filter.ancestorWorkspace(nested[0], nested), undefined, 'a root project has no parent')
+assert.strictEqual(
+  filter.ancestorWorkspace({ workspaceId: 'w-prefix', path: '/repository' }, nested),
+  undefined,
+  'a shared name prefix is not a parent (directory boundary)',
+)
+assert.deepStrictEqual(
+  visible({ favoritesOnly: true }, ['/repo/sub'], nested),
+  [],
+  'a kept child whose parent was filtered out is hidden too (the tree stays whole)',
+)
+assert.deepStrictEqual(
+  visible({ favoritesOnly: true }, ['/repo'], nested),
+  ['w-root'],
+  'a kept parent does not drag its filtered child back in',
+)
+
+// 项目右键菜单：order 50 排在「重命名」（100）之前，图标随收藏状态在实心 / 空心间切。
+await new Promise((resolve) => setTimeout(resolve, 0))
+const favoriteMenu = menuContributions.find((c) => c.id === 'workspace.favorite')
+assert.ok(favoriteMenu !== undefined, 'the favorite menu contribution is registered')
+assert.strictEqual(favoriteMenu.target, 'workspace', 'it targets a project row')
+assert.strictEqual(favoriteMenu.order, 50, 'order 50 puts it above rename (100), i.e. the first line')
+
+favoritePaths = []
+let favoriteActions = favoriteMenu.resolve({ workspaceId: 'w-root', path: '/repo', displayTitle: 'repo' })
+assert.strictEqual(favoriteActions.length, 1, 'one favorite action')
+assert.strictEqual(favoriteActions[0].id, 'favorite', 'the action is the favorites switch')
+assert.ok(String(favoriteActions[0].label).endsWith('.favorite'), 'its label is the favorites dictionary entry')
+assert.strictEqual(favoriteActions[0].icon.key, 'workspace.favoriteOff', 'an unstarred project shows the outline star')
+await favoriteActions[0].run()
+assert.deepStrictEqual(favoriteCalls, ['/repo'], 'running it asks the host half to toggle that path')
+favoriteActions = favoriteMenu.resolve({ workspaceId: 'w-root', path: '/repo', displayTitle: 'repo' })
+assert.strictEqual(favoriteActions[0].icon.key, 'workspace.favoriteOn', 'a starred project shows the filled star')
+await favoriteActions[0].run()
+assert.deepStrictEqual(favoritePaths, [], 'running it again unstars the project')
+
+// 设置页：分割线之后是「仅显示最近」的天数与「仅显示最新」的项目数。
+nodes = renderTab()
+const numberInputs = nodes.filter((n) => n.type === 'input' && hasCls(n, 'dsh-spc-num'))
+assert.strictEqual(numberInputs.length, 2, 'two filter numbers in the settings page')
+assert.deepStrictEqual(numberInputs.map((n) => n.props.value), ['7', '3'], 'defaults are 7 days / 3 projects')
+assert.ok(
+  nodes.some((n) => hasCls(n, 'dsh-spc-sep')),
+  'a rule separates the sidebar-display half from the project-filter half',
+)
+assert.deepStrictEqual(
+  numberInputs.map((n) => [n.props.min, n.props.max]),
+  [[1, 99], [1, 9]],
+  'the inputs carry their own ceilings (99 days / 9 projects)',
+)
+numberInputs[0].props.onChange({ target: { value: '30' } })
+assert.strictEqual(JSON.parse(store.get(prefsKey)).recentDays, 30, 'the day count persists')
+numberInputs[1].props.onChange({ target: { value: '99' } })
+assert.strictEqual(JSON.parse(store.get(prefsKey)).latestCount, 9, 'an over-large project count clamps to 9')
+
+// --- 0.4.0: 收藏落盘（Host 半边）---------------------------------------------
+// 以路径为键、去重、脏输入不动文件；写盘是原子的（临时文件 + 改名）。
+const favHome = fs.mkdtempSync(path.join(os.tmpdir(), 'spc-fav-'))
+process.env.DSH_HOME = favHome
+const favorites = await import('../src/favorites.js')
+assert.deepStrictEqual(favorites.readFavorites(), [], 'no file yet reads as no favorites')
+assert.deepStrictEqual(favorites.toggleFavorite('/work/one'), ['/work/one'], 'toggling adds the path')
+assert.deepStrictEqual(favorites.toggleFavorite('/work/two'), ['/work/one', '/work/two'], 'a second path appends')
+assert.deepStrictEqual(favorites.toggleFavorite('/work/one'), ['/work/two'], 'toggling the same path removes it')
+assert.deepStrictEqual(
+  JSON.parse(fs.readFileSync(favorites.favoritesFile(), 'utf8')),
+  ['/work/two'],
+  'the file holds the plain path list',
+)
+assert.ok(!fs.existsSync(`${favorites.favoritesFile()}.tmp`), 'the temporary file is renamed away')
+assert.deepStrictEqual(favorites.toggleFavorite('/work/two'), [], 'the last path can be removed')
+assert.deepStrictEqual(favorites.toggleFavorite(''), [], 'an empty path is ignored')
+assert.deepStrictEqual(favorites.toggleFavorite(null), [], 'a non-string path is ignored')
+fs.writeFileSync(favorites.favoritesFile(), 'not json')
+assert.deepStrictEqual(favorites.readFavorites(), [], 'a corrupt file reads as no favorites')
+fs.rmSync(favHome, { recursive: true, force: true })
+delete process.env.DSH_HOME
+
+// 星号定位：名字列的判定。宿主项目行的直接子元素是两个图标槽（span，装 svg）、
+// 名字列（span，里面一个装名字的 span）、动作区（span，装 button）。
+const pick = mod.star.pickTextColumn
+const nameColumn = { tag: 'SPAN', hasSpanChild: true, ownText: '' }
+assert.strictEqual(
+  pick([
+    { tag: 'SPAN', hasSpanChild: false, ownText: '' },   // 图标槽
+    { tag: 'SPAN', hasSpanChild: false, ownText: '' },   // 图标槽
+    nameColumn,
+    { tag: 'SPAN', hasSpanChild: false, ownText: '' },   // 动作区
+  ]),
+  nameColumn,
+  'the name column is the span holding a span and no text of its own',
+)
+assert.strictEqual(
+  pick([
+    { tag: 'SPAN', hasSpanChild: false, ownText: '' },
+    { tag: 'SPAN', hasSpanChild: true, ownText: 'direct text' },
+  ]),
+  null,
+  'a span with text of its own is not the name column',
+)
+assert.strictEqual(
+  pick([{ tag: 'SPAN', hasSpanChild: false, ownText: '' }]),
+  null,
+  'a span without a span inside is not the name column',
+)
+assert.strictEqual(pick([]), null, 'no candidates -> no name column')
 
 console.log('smoke: all assertions passed')
 
