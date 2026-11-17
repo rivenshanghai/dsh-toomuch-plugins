@@ -6,6 +6,68 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 0.4.0 (2026-11-13)
+
+### Added / 新增
+
+- **Workspace favorites** — a project row's context menu gains a 「我的最爱」 entry as its **first line** (`ctx.contextMenus`, order 50, ahead of 重命名 at 100). It is a switch: run it once and the project is starred, run it again and the star is gone; the menu icon is a filled star when the project is starred and an outline star otherwise. A starred project shows a small **yellow star** after its name in the sidebar, always visible (not hover-only). Stars are stored in the plugin's own file, `~/.dsh/plugins/dsh-toomuch-plugins/favorites.json`, keyed by the project's **absolute path** — so deleting a workspace and adding the same directory back keeps the star, and the stars follow the DSH home rather than the browser. Written atomically (tmp file + rename), so a crash mid-write leaves the previous list intact.
+
+  **工作区收藏** —— 项目行的右键菜单多一条「我的最爱」，而且永远是**第一行**（走 `ctx.contextMenus`，order 50，排在「重命名」的 100 之前）。它是一个开关：点一次收藏，再点一次取消；已收藏时菜单图标是实心星，未收藏是空心星。被收藏的项目在侧栏项目名后面显示一颗**黄色小星**，常显而不是悬停才出现。收藏存在插件自己的文件 `~/.dsh/plugins/dsh-toomuch-plugins/favorites.json` 里，以项目的**绝对路径**为键 —— 所以删掉工作区再把同一个目录加回来，星还在；换浏览器也还在。写盘是原子写（临时文件 + 改名），写一半崩溃只会留下上一份完整清单。
+
+- **Project filters in 「视图选项 → 筛选会话」** — the host's view-options menu gains three switches: 「仅显示我的最爱项目」、 「仅显示最近 {n} 天」、 「仅显示最新 {m} 个项目」，each with a check mark when on and none when off. They combine with **AND**: turn on two and only projects that pass both stay. 「最近 / 最新」 follow each project's **last session activity**, not its registration date, and a project that never had a session counts as the oldest. Filtered-out projects take their session rows with them (the flat view and search results are filtered the same way); sessions that belong to no project are left alone. In the nested workspace-tree view a child whose parent was filtered out is hidden too, so the tree never shows an orphan row. Clicking a switch does not close the menu — users usually turn on two in a row.
+
+  **「视图选项 → 筛选会话」里的三个项目筛选** —— 宿主的视图选项菜单多三个开关：「仅显示我的最爱项目」「仅显示最近 {n} 天」「仅显示最新 {m} 个项目」，选中打勾、不选没有勾。三者按**「与」**组合：开两个就只剩同时满足的项目。「最近 / 最新」看的是项目**最后一个会话的活跃时间**，不是注册时间；从来没有过会话的项目算最旧。被筛掉的项目连同它底下的会话行一起隐藏（平铺视图与搜索结果同样生效），不属于任何项目的会话不受影响。嵌套的工作区树视图里，父项目被筛掉时子项目也跟着隐藏，不会留下没有父行的孤儿行。点开关**不会关掉菜单** —— 用户通常要连着勾两个。
+
+- **The two numbers live in the settings page** — 「侧栏面板显示」 tab gains a divider and two number fields: days for 「仅显示最近」 (1–99, default 7) and projects for 「仅显示最新」 (1–9, default 3). The three switches and both numbers persist in the existing display-preferences blob; out-of-range or corrupt values fall back to the defaults.
+
+  **两个数放在设置页** —— 「侧栏面板显示」页用一条分割线隔开后，加了两个数字输入：「仅显示最近」的天数（1–99，默认 7）与「仅显示最新」的项目数（1–9，默认 3）。三个开关和这两个数都存在原有的显示偏好里；越界或读坏的值一律回默认。
+
+### Fixed / 修复
+
+- **The star did not appear next to the project name** — the first implementation
+  inserted it at the end of the project row, where the host's `flex: 1` text column
+  pushed it to the far right of the row, right next to the hover-only action strip:
+  it read as "no star at all". It is now inserted immediately after the project
+  name (the text column is switched to a row layout, so the name keeps its own
+  width and its ellipsis still works), and the name column is recognised
+  structurally rather than by the host's hashed class name. The host renders the
+  project row with React, which deletes the injected star when it rebuilds the
+  row, so the watcher now notices removals as well and puts the star back.
+  `node test/star-layout.mjs` checks the placement, the ellipsis and the recovery
+  in a real browser.
+
+  **星号没有出现在项目名旁边** —— 第一版把星号插在项目行末尾，宿主那一列是
+  `flex: 1`，星号被挤到整行最右、紧挨悬停才出现的动作区，看着像根本没画出来。
+  现在星号插在项目名**后面**（名字列改成横向布局，名字自己占宽度、省略号照旧），
+  名字列也改成按结构认，不靠宿主的 hash 类名。宿主用 React 渲染项目行，重建这行
+  时会把它不认的星号一起删掉，所以监听器现在也看「被移除」，星号消失就补回来。
+  `node test/star-layout.mjs` 在真实浏览器里检查位置、省略号与补回。
+
+- **The three filter switches could not be toggled** — they were cloned from the
+  host's own menu rows, and the stylesheet asked for `.dsh-spc-menuItem
+  .dsh-spc-menuCheck` — a class that was never added to anything, so the rule
+  never applied: the check mark could not be hidden and the three switches looked
+  permanently on. The selector now names the class that actually exists. Two
+  related fixes came with it: the host redraws the menu surface on every open, so
+  the cloned rows are brand-new nodes and the check state has to be written again
+  each time (it was skipped once the rows existed), and the cloned icon — the
+  host's archive box, which means nothing for a switch — is dropped.
+  `node test/filter-menu.mjs` checks the whole toggle in a real browser.
+
+  **三个筛选开关点不动** —— 它们是克隆宿主的菜单行插进去的，而样式表写的是
+  `.dsh-spc-menuItem .dsh-spc-menuCheck` —— `dsh-spc-menuItem` 从未被添加到任何
+  元素上，规则因此从不生效：勾没法被隐藏，三个开关看起来永远是开着的。现在选择器
+  改用真正存在的类名。同时修了两处相关问题：宿主每次打开菜单都重画这一片 DOM，
+  克隆出来的行是**全新节点**，勾的状态每次都要重写一遍（原先只要行在就不管了）；
+  克隆来的图标（宿主的归档箱子，对开关没有意义）也去掉了。
+  `node test/filter-menu.mjs` 在真实浏览器里检查整个切换过程。
+
+### Changed / 变更
+
+- **The view-options switches and the star are DOM surgery** — DSH gives the project row no decoration seat and hardcodes the view-options menu items, so both are done incrementally on the rendered DOM: the star is inserted into the row, and the three switches are **cloned from the host's own menu rows** (so height, padding, icons and hover follow the host, including theme switches). Both are located structurally (`data-row-key`, `role="presentation"`, `data-menu-material`), never by hashed class name. If a DSH release changes either shape, the selectors stop matching and the star / switches simply do not appear — nothing else breaks, the same safe failure this plugin already uses for the panel list.
+
+  **视图选项的开关与星号是对 DOM 的增量改动** —— DSH 没给项目行留装饰位、视图选项菜单项也是写死的，所以两处都在渲染后的 DOM 上做增量：星号插进行内，三个开关**克隆宿主自己的菜单行**（行高、内边距、图标、悬停态都跟着宿主，主题切换也一致）。两处都靠结构关系定位（`data-row-key`、`role="presentation"`、`data-menu-material`），不认哈希 class 名。DSH 改掉这两种结构时选择器失配，星号与开关只是不出现，别的都照旧 —— 与本插件对面板列表的失效策略一致。
+
 ## 0.3.3 (2026-11-13)
 
 > 这一版同时带上了此前起草为 0.4.0、但从未发布也从未打 tag 的内容（插件操作记录）。
@@ -60,7 +122,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sidebar panel collapse** — collapses the global-panel entry list above the workspace in the DSH Web left sidebar into a single toggle in the sidebar footer. The choice is remembered in `localStorage` and survives reloads. / **侧栏面板收起** —— 把 DSH Web 左栏工作区上方的全局面板入口收起成侧栏底部的一个开关，选择记在 `localStorage` 里，刷新后保持。
 - Works in the narrow 56px rail, where the toggle collapses into a round icon button. / 窄栏（56px rail）下自动变成圆钮。
 
-[Unreleased]: https://github.com/rivenshanghai/dsh-toomuch-plugins/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/rivenshanghai/dsh-toomuch-plugins/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/rivenshanghai/dsh-toomuch-plugins/releases/tag/v0.4.0
+[0.3.3]: https://github.com/rivenshanghai/dsh-toomuch-plugins/releases/tag/v0.3.3
 [0.3.1]: https://github.com/rivenshanghai/dsh-toomuch-plugins/releases/tag/v0.3.1
 [0.3.0]: https://github.com/rivenshanghai/dsh-toomuch-plugins/releases/tag/v0.3.0
 [0.2.0]: https://github.com/rivenshanghai/dsh-toomuch-plugins/releases/tag/v0.2.0
