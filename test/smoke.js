@@ -376,7 +376,7 @@ const pickButtons = (nodes, key) => {
 
 // Defaults: grid off, list-mode collapsed-count picker (0-5, nothing shown).
 let nodes = renderTab()
-assert.strictEqual(nodes.find((n) => n.type === 'input').props.checked, false, 'grid off by default')
+assert.strictEqual(nodes.find((n) => n.type === 'input' && n.props.type === 'checkbox').props.checked, false, 'grid off by default')
 const countBtns = pickButtons(nodes, 'collapsedCount')
 assert.deepStrictEqual(countBtns.map((n) => n.children[0]), ['0', '1', '2', '3', '4', '5'], 'collapsed-count options 0-5')
 assert.deepStrictEqual(
@@ -389,7 +389,7 @@ assert.strictEqual(pickButtons(nodes, 'collapsedRows'), null, 'no row picker in 
 
 // Enabling grid through the checkbox's onChange writes prefs and re-renders:
 // column picker (2/3/4, current 3) plus the collapsed-row picker (0-3).
-const checkbox = nodes.find((n) => n.type === 'input')
+const checkbox = nodes.find((n) => n.type === 'input' && n.props.type === 'checkbox')
 checkbox.props.onChange({ target: { checked: true } })
 assert.deepStrictEqual(
   JSON.parse(store.get(prefsKey)),
@@ -397,7 +397,7 @@ assert.deepStrictEqual(
   'writePrefs',
 )
 nodes = renderTab()
-assert.strictEqual(nodes.find((n) => n.type === 'input').props.checked, true, 'grid on after write')
+assert.strictEqual(nodes.find((n) => n.type === 'input' && n.props.type === 'checkbox').props.checked, true, 'grid on after write')
 const cols = pickButtons(nodes, 'columns')
 assert.deepStrictEqual(cols.map((n) => n.children[0]), ['2', '3', '4'], 'column options 2-4')
 assert.deepStrictEqual(cols.map((n) => n.props['aria-pressed']), [false, true, false], 'columns=3 pressed')
@@ -434,7 +434,7 @@ assert.strictEqual(
 // Corrupt JSON falls back to safe defaults instead of throwing.
 store.set(prefsKey, 'not json')
 nodes = renderTab()
-assert.strictEqual(nodes.find((n) => n.type === 'input').props.checked, false, 'corrupt -> grid off')
+assert.strictEqual(nodes.find((n) => n.type === 'input' && n.props.type === 'checkbox').props.checked, false, 'corrupt -> grid off')
 assert.strictEqual(pickButtons(nodes, 'columns'), null, 'corrupt -> no column picker')
 assert.strictEqual(
   pickButtons(nodes, 'collapsedCount').find((n) => hasCls(n, 'dsh-spc-colOn')).children[0],
@@ -1098,7 +1098,7 @@ assert.deepStrictEqual(
 )
 
 const visible = (prefs, favorites = [], items = projects) =>
-  [...filter.visibleWorkspaceIds(items, summaries, favorites, prefs, NOW)]
+  [...filter.visibleWorkspaceIds(items, summaries, favorites, prefs, NOW).visible]
 assert.deepStrictEqual(visible({ favoritesOnly: true }, ['/other']), ['w-bare'], 'favorites only keeps the starred project')
 assert.deepStrictEqual(
   visible({ favoritesOnly: true, recentOnly: true }, ['/other']),
@@ -1135,14 +1135,19 @@ assert.strictEqual(
   'a shared name prefix is not a parent (directory boundary)',
 )
 assert.deepStrictEqual(
-  visible({ favoritesOnly: true }, ['/repo/sub'], nested),
-  [],
-  'a kept child whose parent was filtered out is hidden too (the tree stays whole)',
+  visible({ favoritesOnly: true }, ['/repo/sub'], nested).sort(),
+  ['w-root', 'w-sub'],
+  'a kept child brings its parent along (no orphan row in the tree)',
 )
 assert.deepStrictEqual(
   visible({ favoritesOnly: true }, ['/repo'], nested),
   ['w-root'],
   'a kept parent does not drag its filtered child back in',
+)
+assert.deepStrictEqual(
+  [...filter.visibleWorkspaceIds(nested, summaries, ['/repo/sub'], { favoritesOnly: true }, NOW).qualifying],
+  ['w-sub'],
+  'only the project that matches is "qualifying" (its sessions show; the parent\'s do not)',
 )
 
 // 项目右键菜单：order 50 排在「重命名」（100）之前，图标随收藏状态在实心 / 空心间切。
@@ -1179,6 +1184,13 @@ assert.deepStrictEqual(
   [[1, 99], [1, 9]],
   'the inputs carry their own ceilings (99 days / 9 projects)',
 )
+// 两个数字框在页面的最上方：它们排在分割线之前，网格开关在分割线之后。
+const order = nodes.filter((n) => n.type === 'input' || hasCls(n, 'dsh-spc-sep'))
+assert.deepStrictEqual(
+  order.map((n) => (n.type === 'input' ? (hasCls(n, 'dsh-spc-num') ? 'num' : 'checkbox') : 'sep')),
+  ['num', 'num', 'sep', 'checkbox'],
+  'the two filter numbers come first, then the rule, then the sidebar-display settings',
+)
 numberInputs[0].props.onChange({ target: { value: '30' } })
 assert.strictEqual(JSON.parse(store.get(prefsKey)).recentDays, 30, 'the day count persists')
 numberInputs[1].props.onChange({ target: { value: '99' } })
@@ -1209,32 +1221,15 @@ delete process.env.DSH_HOME
 
 // 星号定位：名字列的判定。宿主项目行的直接子元素是两个图标槽（span，装 svg）、
 // 名字列（span，里面一个装名字的 span）、动作区（span，装 button）。
-const pick = mod.star.pickTextColumn
-const nameColumn = { tag: 'SPAN', hasSpanChild: true, ownText: '' }
-assert.strictEqual(
-  pick([
-    { tag: 'SPAN', hasSpanChild: false, ownText: '' },   // 图标槽
-    { tag: 'SPAN', hasSpanChild: false, ownText: '' },   // 图标槽
-    nameColumn,
-    { tag: 'SPAN', hasSpanChild: false, ownText: '' },   // 动作区
-  ]),
-  nameColumn,
-  'the name column is the span holding a span and no text of its own',
-)
-assert.strictEqual(
-  pick([
-    { tag: 'SPAN', hasSpanChild: false, ownText: '' },
-    { tag: 'SPAN', hasSpanChild: true, ownText: 'direct text' },
-  ]),
-  null,
-  'a span with text of its own is not the name column',
-)
-assert.strictEqual(
-  pick([{ tag: 'SPAN', hasSpanChild: false, ownText: '' }]),
-  null,
-  'a span without a span inside is not the name column',
-)
-assert.strictEqual(pick([]), null, 'no candidates -> no name column')
+// 行的识别不靠 key 的前缀（宿主把 `workspace:` 换成了 `ws-`）：按尾部 id 匹配。
+assert.strictEqual(mod.star.keyIsId('ws-11111111-2222-3333-4444-555555555555', '11111111-2222-3333-4444-555555555555'), true, 'ws-<id> matches by id')
+assert.strictEqual(mod.star.keyIsId('workspace:11111111-2222-3333-4444-555555555555', '11111111-2222-3333-4444-555555555555'), true, 'workspace:<id> matches by id')
+assert.strictEqual(mod.star.keyIsId('session:session-11111111-2222-3333-4444-555555555555', '11111111-2222-3333-4444-555555555555'), true, 'session:<id> matches by id')
+assert.strictEqual(mod.star.keyIsId('ws-11111111-2222-3333-4444-555555555555', '99999999-2222-3333-4444-555555555555'), false, 'a different id does not match')
+assert.strictEqual(mod.star.keyIsId('ws-abcdef11111111-2222-3333-4444-555555555555', '11111111-2222-3333-4444-555555555555'), false, 'a suffix of another id does not match')
+assert.strictEqual(mod.star.keyIsId('ungrouped-label', '11111111-2222-3333-4444-555555555555'), false, 'an unrelated key does not match')
+assert.strictEqual(mod.star.idOfKey('session:session-abc'), 'session-abc', 'the id is what follows the last colon')
+assert.strictEqual(mod.star.idOfKey('ws-abc'), 'ws-abc', 'a key without a colon is its own id')
 
 console.log('smoke: all assertions passed')
 

@@ -18,12 +18,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   **「视图选项 → 筛选会话」里的三个项目筛选** —— 宿主的视图选项菜单多三个开关：「仅显示我的最爱项目」「仅显示最近 {n} 天」「仅显示最新 {m} 个项目」，选中打勾、不选没有勾。三者按**「与」**组合：开两个就只剩同时满足的项目。「最近 / 最新」看的是项目**最后一个会话的活跃时间**，不是注册时间；从来没有过会话的项目算最旧。被筛掉的项目连同它底下的会话行一起隐藏（平铺视图与搜索结果同样生效），不属于任何项目的会话不受影响。嵌套的工作区树视图里，父项目被筛掉时子项目也跟着隐藏，不会留下没有父行的孤儿行。点开关**不会关掉菜单** —— 用户通常要连着勾两个。
 
-- **The two numbers live in the settings page** — 「侧栏面板显示」 tab gains a divider and two number fields: days for 「仅显示最近」 (1–99, default 7) and projects for 「仅显示最新」 (1–9, default 3). The three switches and both numbers persist in the existing display-preferences blob; out-of-range or corrupt values fall back to the defaults.
+- **The two numbers live at the top of the settings page** — the 「侧栏面板显示」 tab opens with two number fields: days for 「仅显示最近」 (1–99, default 7) and projects for 「仅显示最新」 (1–9, default 3), followed by a note explaining that recent / latest follow each project's last session activity. A divider separates them from the sidebar-display settings below. The three switches and both numbers persist in the existing display-preferences blob; out-of-range or corrupt values fall back to the defaults.
 
-  **两个数放在设置页** —— 「侧栏面板显示」页用一条分割线隔开后，加了两个数字输入：「仅显示最近」的天数（1–99，默认 7）与「仅显示最新」的项目数（1–9，默认 3）。三个开关和这两个数都存在原有的显示偏好里；越界或读坏的值一律回默认。
+  **两个数放在设置页最上方** —— 「侧栏面板显示」页一打开就是两个数字输入：「仅显示最近」的天数（1–99，默认 7）与「仅显示最新」的项目数（1–9，默认 3），下面一行说明「最近 / 最新按项目最后一个会话的活跃时间算」，再一条分割线把侧栏显示的设置隔到下面。三个开关和这两个数都存在原有的显示偏好里；越界或读坏的值一律回默认。
 
 ### Fixed / 修复
 
+- **Nothing in the workspace area was matched: no star, and the filtered projects
+  stayed in the list** — the plugin was written against a DSH build whose project
+  rows carry `data-row-key="workspace:<id>"` and a `.projectText > .title` label,
+  but the DSH actually running here (v0.2.2-rc.3's rewritten workspace browser)
+  emits `data-row-key="ws-<id>"` and a `.bw-row-label`. The selectors matched
+  nothing, so no star was drawn and no project row was hidden — while the session
+  rows (whose key prefix did not change) were filtered correctly, which made it
+  look like "the other projects are still listed but their sessions cannot be
+  opened". Rows are now matched by **id** instead of by key prefix (the row key
+  ends with the workspace / session id, whatever the prefix is), and the label is
+  found by shape — the first element with text of its own and no child elements —
+  rather than by comparing against the row's whole text, which the host changes
+  when it asynchronously appends a session-count badge.
+- **A filtered-out project's ancestor is now kept** — a project that does not pass
+  the filter is hidden outright, and a project that *does* pass keeps its parent
+  directory visible, so a qualifying child is never an orphan row in the tree.
+  The parent is only a container: its own sessions stay hidden unless it qualifies
+  too.
 - **The star did not appear next to the project name** — the first implementation
   inserted it at the end of the project row, where the host's `flex: 1` text column
   pushed it to the far right of the row, right next to the hover-only action strip:
@@ -36,6 +54,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `node test/star-layout.mjs` checks the placement, the ellipsis and the recovery
   in a real browser.
 
+  **工作区那边一个都没匹配上：既没有星号，被筛掉的项目也还在列表里** ——
+  插件是照着一个项目行写成 `data-row-key="workspace:<id>"`、标签是
+  `.projectText > .title` 的 DSH 构建写的，但**本机实际跑的**那个版本（v0.2.2-rc.3
+  重写过的工作区浏览器）给出的是 `data-row-key="ws-<id>"` 和 `.bw-row-label`。
+  选择器一个都匹配不上 —— 于是星号插不进去、项目行也藏不住，而会话行（key 前缀
+  没变）却筛对了，表现为「别的项目还在列表里、但会话打不开」。现在改成**按 id
+  匹配**（行 key 的尾部就是 id，前缀是什么都行），标签也改成按形状找（行里第一个
+  「文字非空、自己没有子元素」的元素），不再拿整行文字比对 —— 宿主会异步补一个
+  会话数徽标，整行文字会变。
+  **被筛掉的项目，它的祖先要留着** —— 不符合条件的项目整行隐藏；符合条件的项目，
+  它的父目录那一行也显示，这样合格的子项目在树里不会成为没有父行的孤儿。父节点
+  只是容器：它自己的会话仍然不显示。
   **星号没有出现在项目名旁边** —— 第一版把星号插在项目行末尾，宿主那一列是
   `flex: 1`，星号被挤到整行最右、紧挨悬停才出现的动作区，看着像根本没画出来。
   现在星号插在项目名**后面**（名字列改成横向布局，名字自己占宽度、省略号照旧），

@@ -36,10 +36,11 @@ const { chromium } = await import(playwright)
 /** 宿主的项目行（rc.3 的 Rows.tsx + Rows.module.css 的关键规则）。 */
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body>
 <div id="row" class="projectRow" data-row-key="workspace:11111111-2222-3333-4444-555555555555" role="treeitem" aria-expanded="false">
-  <span class="slot folder">F</span>
-  <span class="slot chevron">C</span>
-  <span class="projectText"><span class="title">my-project</span></span>
-  <span class="rowActions"></span>
+  <span class="bw-chevron"><span class="bw-arrow"></span></span>
+  <span class="bw-row-icon bw-folder-cell"></span>
+  <span class="bw-row-label" title="my-project">my-project</span>
+  <span class="bw-row-count">3</span>
+  <span class="bw-row-actions"></span>
 </div>
 <script>window.__ModuleLoader__={load:(m)=>{window.__mod=m}}</script>
 </body></html>`
@@ -72,21 +73,17 @@ const result = await page.evaluate(async () => {
     slot.style.height = '20px'
     slot.style.display = 'inline-flex'
   }
-  const text = row.querySelector('.projectText')
-  text.style.flex = '1'
-  text.style.minWidth = '0'
-  text.style.display = 'flex'
-  text.style.flexDirection = 'column'
-  text.style.gap = '2px'
-  const title = row.querySelector('.title')
+  const title = row.querySelector('.bw-row-label')
   title.style.minWidth = '0'
   title.style.overflow = 'hidden'
   title.style.textOverflow = 'ellipsis'
   title.style.whiteSpace = 'nowrap'
   title.style.fontSize = '14px'
   title.style.lineHeight = '20px'
-  row.querySelector('.rowActions').style.flex = 'none'
-  row.querySelector('.rowActions').style.display = 'none'
+  title.style.flex = '1 1 0%'
+  row.querySelector('.bw-row-count').style.flex = 'none'
+  row.querySelector('.bw-row-actions').style.flex = 'none'
+  row.querySelector('.bw-row-actions').style.display = 'none'
 
   const style = document.createElement('style')
   style.textContent = '.dsh-spc-star{align-items:center;color:#e8a33d;display:inline-flex;flex:none;}'
@@ -148,6 +145,7 @@ const result = await page.evaluate(async () => {
 
   // 长名字：省略号照旧，星号仍然可见
   title.textContent = 'a-very-very-long-project-name-that-should-be-truncated'
+  title.removeAttribute('title')
   const longTitle = title.getBoundingClientRect()
   const longStar = row.querySelector('[data-spc-star]').getBoundingClientRect()
   const longRow = row.getBoundingClientRect()
@@ -157,13 +155,16 @@ const result = await page.evaluate(async () => {
   }
 
   // 宿主重建这一行（React 换掉 children）：星号要自己回来
-  const fresh = document.createElement('span')
-  fresh.className = 'projectText'
-  fresh.innerHTML = '<span class="title">my-project</span>'
-  text.replaceWith(fresh)
-  const rightAfterRebuild = row.querySelectorAll('[data-spc-star]').length
+  const fresh = document.createElement('div')
+  fresh.className = row.className
+  fresh.setAttribute('data-row-key', row.getAttribute('data-row-key'))
+  fresh.innerHTML = '<span class="bw-chevron"></span><span class="bw-row-icon"></span>'
+    + '<span class="bw-row-label" title="my-project">my-project</span>'
+  row.replaceWith(fresh)
+  // 在文档里数：旧行已经脱离文档了，在旧行上数会一直看到那颗星。
+  const rightAfterRebuild = document.querySelectorAll('[data-spc-star]').length
   await new Promise((resolve) => setTimeout(resolve, 400))
-  const afterRebuild = row.querySelectorAll('[data-spc-star]').length
+  const afterRebuild = document.querySelectorAll('[data-spc-star]').length
 
   return { placed, longName, rightAfterRebuild, afterRebuild }
 })

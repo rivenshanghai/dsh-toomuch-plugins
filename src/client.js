@@ -221,11 +221,10 @@ nav [data-spc-hidden]{display:none;}
    symbols carry a viewBox, so the drawing scales with the viewport. */
 nav.dsh-spc-size-sm :is(button,[role=button],[data-spc-adopted]) svg{width:12px !important;height:12px !important;}
 nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px !important;height:24px !important;}
-/* 工作区收藏：项目名后面的黄星。宿主没有给项目行留装饰槽位，只能在行里插。
-   星号所在的名字列由脚本改成 row 布局（dsh-spc-starCol），名字自己占宽度、
-   长了省略号，星号紧跟其后。 */
+/* 工作区收藏：项目名旁边的黄星。宿主没有给项目行留装饰槽位，只能在行里插。
+   星号插成标签的后继兄弟，标签被脚本改成 flex:0 1 auto（只占内容宽度、可以被
+   压缩出省略号），于是名字短时星紧跟其后，名字长时标签先压缩、星仍然露着。 */
 .dsh-spc-star{align-items:center;color:var(--dsw-alias-state-warn-primary,#e8a33d);display:inline-flex;flex:none;}
-.dsh-spc-starCol > .dsh-spc-title{flex:0 1 auto;min-width:0;}
 /* 注入到宿主「视图选项」菜单里的三个筛选开关。勾挂在菜单行末尾；没勾上时
    整个元素隐藏（display:none 由 [data-off] 决定）。 */
 .dsh-spc-menuCheck{align-items:center;display:inline-flex;flex:none;margin-left:auto;}
@@ -360,6 +359,38 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
       }
     }
 
+    /**
+     * 行 key 里的 id 部分。
+     *
+     * 宿主的 key 形态在变：`ws-<id>`（无冒号）、`session:<id>`、`session:session-<id>`。
+     * 统一取**最后一个冒号之后**的部分；没有冒号就取整串。这样 `ws-<uuid>` 与
+     * `session:session-<uuid>` 都能靠尾部对上各自的 id。
+     * @param {string} key 行的 `data-row-key`。
+     * @returns {string} key 里的 id 部分。
+     */
+    function idOfKey(key) {
+      const at = key.lastIndexOf(':')
+      return at === -1 ? key : key.slice(at + 1)
+    }
+
+    /**
+     * 某行是不是**这个 id** 的行。
+     *
+     * 用尾部匹配（`ws-<id>` / `session:<id>` 都以 id 结尾），但要求 id 前面是
+     * 分隔符而不是别的 id 的一部分 —— 否则一个以另一个 id 结尾的 id 会误判。
+     * @param {string} key 行的 `data-row-key`。
+     * @param {string} id 要找的 id。
+     * @returns {boolean} 是否是这一行。
+     */
+    function keyIsId(key, id) {
+      if (typeof id !== 'string' || id === '') return false
+      const tail = idOfKey(key)
+      if (!tail.endsWith(id)) return false
+      const before = tail.slice(0, tail.length - id.length)
+      // 前缀里若还有别的 id 字符，说明撞上了另一个 id。
+      return before === '' || !/[0-9a-z]/i.test(before.slice(-1))
+    }
+
     /** 一天有多少毫秒。 */
     const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -442,6 +473,24 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
      * @param {number} now 当前时间（毫秒）。
      * @returns {Set<string>} 可见的工作区 id。
      */
+    /**
+     * 当前筛选下**可见**的工作区。
+     *
+     * 两个集合：
+     *  - `qualifying`：自己满足筛选条件的项目（收藏 / 最近 / 最新）。它们的会话
+     *    照常显示，可以打开。
+     *  - `visible`：行要显示出来的项目 = 符合条件的，加上**它们的后代所在的祖先**
+     *    —— 父节点要留着，子项目才不是孤儿行、也才点得开。祖先自己不符合条件，
+     *    所以它的会话不显示。
+     *
+     * 三个开关按「与」组合。
+     * @param {readonly {workspaceId: string, path: string, sessionIds?: readonly string[]}[]} items 工作区列表。
+     * @param {Readonly<Record<string, {updatedAt?: number}>>} sessions 会话摘要表。
+     * @param {Iterable<string>} favorites 收藏的项目路径。
+     * @param {object} prefs 筛选偏好（会被清洗）。
+     * @param {number} now 当前时间（毫秒）。
+     * @returns {{visible: Set<string>, qualifying: Set<string>}} 可见与符合条件的项目 id。
+     */
     function visibleWorkspaceIds(items, sessions, favorites, prefs, now) {
       const filter = sanitizeFilterPrefs(prefs)
       const lastAt = lastActivityByWorkspace(items, sessions)
@@ -454,60 +503,23 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
       const latest = new Set(ranked.slice(0, filter.latestCount).map((item) => item.workspaceId))
       const cutoff = now - filter.recentDays * DAY_MS
       const favoriteSet = favorites instanceof Set ? favorites : new Set(favorites ?? [])
-      const visible = new Set()
+      const qualifying = new Set()
       for (const item of items) {
         const last = lastAt.get(item.workspaceId) ?? 0
         if (filter.favoritesOnly && !favoriteSet.has(item.path)) continue
         if (filter.recentOnly && (last === 0 || last < cutoff)) continue
         if (filter.latestOnly && !latest.has(item.workspaceId)) continue
-        visible.add(item.workspaceId)
+        qualifying.add(item.workspaceId)
       }
-      // 祖先被筛掉 → 自己跟着隐藏。
+      // 符合条件的项目的祖先也留着：树里不能出现没有父行的子行。
+      const visible = new Set(qualifying)
       for (const item of items) {
-        if (!visible.has(item.workspaceId)) continue
+        if (!qualifying.has(item.workspaceId)) continue
         for (let parent = ancestorWorkspace(item, items); parent !== undefined; parent = ancestorWorkspace(parent, items)) {
-          if (visible.has(parent.workspaceId)) continue
-          visible.delete(item.workspaceId)
-          break
+          visible.add(parent.workspaceId)
         }
       }
-      return visible
-    }
-
-    /**
-     * 名字列的判定规则（纯逻辑，冒烟检查直接断言）。
-     *
-     * 宿主项目行的直接子元素依次是：两个 `span.slot`（图标）、名字列
-     * （`span.projectText`，自己不含文字、里面有一个装名字的 span）、动作区
-     * （`span.rowActions`，含按钮）。
-     *
-     * 判据是「自身没有直接文本节点」：名字列的文字全在它里面的 span 里，
-     * `textContent` 会连孙子的文字一起算上，所以要看**直接**文本节点。动作区
-     * 是 span 但没有 span 后代（装的是 button），图标槽也是（装的是 svg）。
-     * @param {readonly {tag: string, hasSpanChild: boolean, ownText: string}[]} candidates 行的直接子元素。
-     * @returns {object|null} 名字列那个候选，没有则 null。
-     */
-    function pickTextColumn(candidates) {
-      for (const candidate of candidates) {
-        if (candidate.tag !== 'SPAN') continue
-        if (!candidate.hasSpanChild) continue
-        if (candidate.ownText !== '') continue
-        return candidate
-      }
-      return null
-    }
-
-    /**
-     * 一个元素**直接**拥有的文字（不含后代的文字）。
-     * @param {Element} element 待读的元素。
-     * @returns {string} 直接文本节点的文字，trim 后。
-     */
-    function directTextOf(element) {
-      let out = ''
-      for (const node of element.childNodes) {
-        if (node.nodeType === 3) out += node.textContent ?? ''
-      }
-      return out.trim()
+      return { visible, qualifying }
     }
 
     /** Cross-component sync: the settings page writes, the toggle re-applies. */
@@ -1115,17 +1127,18 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
      * 工作区收藏与筛选的 DOM 层（0.4.0）
      *
      * 宿主没给这两处留扩展点，只能做增量：
-     *  - 项目行（`[data-row-key="workspace:<id>"]`）里没有装饰位 —— 星号插进行内；
+     *  - 项目行里没有装饰位 —— 星号插在项目名旁边；
      *  - 「视图选项 → 筛选会话」是宿主写死的 items 数组 —— 三个开关克隆宿主自己的
      *    菜单行插进去，配色、行高、悬停态都跟着宿主走。
-     * 两处都靠结构关系定位（data 属性 / role），不认哈希 class 名。宿主改掉结构时
-     * 选择器失配：星号与开关不出现，其余功能照旧 —— 与插件其余部分一样的安全失效。
+     *
+     * **行怎么认**：不靠 `data-row-key` 的前缀 —— 宿主把前缀从 `workspace:` 改成
+     * 过 `ws-`，前缀一变就全认不出来。改成**按 id 匹配**：工作区的 id 是知道的
+     * （工作区快照里有），行 key 的尾部就是这个 id（`ws-<id>` / `workspace:<id>`
+     * 都一样）。会话行同理。宿主再改前缀也不影响。
      * ------------------------------------------------------------------ */
 
-    /** 项目行；`workspace:` 后面是工作区 id。 */
-    const PROJECT_ROW = '[data-row-key^="workspace:"]'
-    /** 会话行；`session:` 后面是会话 id。 */
-    const SESSION_ROW = '[data-row-key^="session:"]'
+    /** 所有带 key 的行。 */
+    const ROW = '[data-row-key]'
     /** 被筛掉的行打这个标记（CSS 隐藏，可整批撤销）。 */
     const FILTER_HIDDEN = 'data-spc-fhide'
     /** 我们自己插的星号。 */
@@ -1209,21 +1222,25 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
       }
 
       /**
-       * 星号：插在项目名**后面**，紧挨着名字。
+       * 星号：插在项目名**旁边**，紧挨着名字。
        *
-       * 宿主的项目行是 `<div class=projectRow><span class=slot/>×2
-       * <span class=projectText><span class=title>名字</span></span>
-       * <span class=rowActions/></div>`：
-       *  - `.projectText` 是 `flex:1` 的**列**容器，`.title` 在它里面；
-       *  - `.title` 自己带 `overflow:hidden; text-overflow:ellipsis` —— 名字长了
-       *    会被裁掉，所以星号不能插在 `.title` 里面（跟着一起被裁）。
-       *  - 行尾（`.rowActions` 之前）同样不对：`.projectText` 的 `flex:1` 会把
-       *    星号挤到整行最右边，紧挨悬停才出现的动作区，看起来像没有星号。
+       * 宿主的项目行（v0.2.2-rc.3 实际跑的形态）：
+       * `<div class="bw-row bw-container-row" data-row-key="ws-<id>">`
+       * `  <span class="bw-chevron"/><span class="bw-row-icon"/>`
+       * `  <span class="bw-row-label" title="名字">名字</span>`
+       * `  <span class="bw-row-actions"/></div>`
        *
-       * 正确做法：把 `.projectText` 变成横向 flex（`row`），星号作为 `.title`
-       * 的后继兄弟插进去 —— 名字占自己的宽度（长了省略号），星号紧跟其后。
-       * 类名是构建期 hash，认不出来，所以按结构找：`.projectText` 是行内第一个
-       * 「含子 span 的 span」，`.title` 是它唯一的子 span。
+       * 标签（`.bw-row-label`）是 `flex:1 1 0%` 的块，里面带
+       * `overflow:hidden + ellipsis`。所以：
+       *  - 星**不能插进标签里** —— 名字长了会连着星一起被裁掉；
+       *  - 星**不能插在行尾** —— 标签的 `flex:1` 会把它挤到整行最右。
+       *
+       * 做法：星插成标签的**后继兄弟**，并把标签改成 `flex:0 1 auto`（只占内容
+       * 宽度、可以被压缩）。名字短时星紧跟其后；名字长时标签先压缩出省略号，
+       * 星仍然露在外面。
+       *
+       * 标签怎么认：不靠类名（构建期会变），而是**文本与整行相同的最深那个元素**
+       * —— 图标槽、箭头槽、动作区里的文字都跟整行对不上。
        * @param {Element} row 项目行。
        * @param {boolean} wanted 是否要显示星号。
        */
@@ -1234,45 +1251,34 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
           return
         }
         if (existing !== null) return
-        const text = textColumnOf(row)
-        if (text === null) return
-        // 横向化：名字与星号并排。`align-items` 让星号与文字齐平。
-        text.style.flexDirection = 'row'
-        text.style.alignItems = 'center'
-        text.style.gap = '4px'
-        text.classList.add('dsh-spc-starCol')
-        const title = text.querySelector('span')
-        if (title !== null) {
-          title.classList.add('dsh-spc-title')
-          // 紧跟名字，而不是排在整列末尾：列里若还有别的元素，排在末尾会离名字很远。
-          title.after(starNode())
-          return
-        }
-        text.appendChild(starNode())
+        const label = labelOf(row)
+        if (label === null) return
+        // 标签只占内容宽度，可以被压缩出省略号 —— 星号才有位置留在旁边。
+        label.style.flex = '0 1 auto'
+        label.after(starNode())
       }
 
       /**
-       * 项目行里装着项目名的那一列（宿主的 `.projectText`）。
+       * 项目行里的**标签**元素（装着项目名的那一个）。
        *
-       * 认法（不靠 hash 类名）：项目行的直接子元素里，`span.slot` 有两个（图标），
-       * 接着是那个「自己还含一个 span」的 span —— 它就是名字列；它里面那个 span
-       * 是 `.title`。会话行没有这个形状，所以不会误认。
+       * 判据：行里**文字非空、且自己不含子元素**的元素，取 DOM 顺序第一个。
+       *  - 新版宿主：`<span class="bw-row-label" title="名字">名字</span>` ——
+       *    标签是纯文字、没有子元素；会话数徽标在它后面，靠 DOM 顺序排在后面。
+       *  - 旧版宿主：`<span class="projectText"><span class="title">名字</span>
+       *    </span>` —— 外层含子元素不算，内层的 `.title` 才是。
+       *
+       * **不能**用「文字等于整行文字」来判定：宿主会异步补一个会话数徽标，
+       * 整行文字随之改变，判定就失配 —— 新渲染的行会找不到标签、插不上星。
        * @param {Element} row 项目行。
-       * @returns {Element|null} 名字列，找不到则 null。
+       * @returns {Element|null} 标签元素，找不到则 null。
        */
-      function textColumnOf(row) {
-        const candidates = []
-        for (const child of row.children) {
-          candidates.push({
-            tag: child.tagName,
-            hasSpanChild: child.querySelector('span') !== null,
-            // 只看直接文本节点：`textContent` 会把孙子的文字也算进来。
-            ownText: directTextOf(child),
-            element: child,
-          })
+      function labelOf(row) {
+        for (const el of row.querySelectorAll('*')) {
+          if (el.children.length > 0) continue
+          if ((el.textContent ?? '').trim() === '') continue
+          return el
         }
-        const picked = pickTextColumn(candidates)
-        return picked === null ? null : picked.element
+        return null
       }
 
       /** 显隐：加 / 去一个标记属性，样式由插件自己的样式表提供。 */
@@ -1288,7 +1294,7 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
        * @param {{kind: string, key: string, label: (t: Function) => string}} filter 开关定义。
        * @returns {Element|null} 新的一行；模板结构对不上则 null。
        */
-      function cloneFilterRow(wrap, filter) {
+      function cloneFilterRow(wrap, filter, shared) {
         const clone = wrap.cloneNode(true)
         clone.setAttribute(FILTER_ROW, filter.kind)
         const btn = clone.matches('button') ? clone : clone.querySelector('button')
@@ -1297,6 +1303,12 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
         btn.removeAttribute('aria-current')
         btn.removeAttribute('aria-disabled')
         btn.removeAttribute('aria-describedby')
+        // 只留基础类：模板可能带着宿主的选中态类。
+        if (shared !== undefined) {
+          for (const name of [...btn.classList]) {
+            if (!shared.has(name)) btn.classList.remove(name)
+          }
+        }
         // 模板行末的勾（宿主给已选中项画的）不能留：那是它自己那项的状态。
         for (const svg of btn.querySelectorAll('svg')) {
           if (svg.getAttribute('class') === null || svg.getAttribute('class').includes('check')) svg.remove()
@@ -1347,16 +1359,39 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
         if (surface.querySelectorAll('[role="presentation"]').length < 2) return
         const items = [...surface.querySelectorAll('button[role="menuitem"]')]
         const template = items[items.length - 1]
-        const wrap = template === undefined ? null : template.parentElement
+        if (template === undefined) return
+        const wrap = template.parentElement
+        // 模板可能是当前**选中**的那一项（宿主给它多加了选中态的类）。克隆时要把
+        // 「不是所有条目都有的类」去掉，否则三个开关会顶着宿主的选中态显示。
+        const shared = sharedClasses(items)
         // 插到宿主条目所在的那一层容器里，而不是面板根上：条目外面若还有一层包裹，
         // 插到根上就会落在包裹外面、撑不满一行。
         const host = wrap === null ? null : wrap.parentElement
         if (host === null || !surface.contains(host)) return
         for (const filter of FILTER_SWITCHES) {
-          const row = cloneFilterRow(wrap, filter)
+          const row = cloneFilterRow(wrap, filter, shared)
           if (row !== null) host.appendChild(row)
         }
         syncFilterRows()
+      }
+
+      /**
+       * 所有菜单项**都有**的类名（基础类）。
+       *
+       * 选中态的类只加在被选中的那一项上，所以交集里没有它 —— 用交集给克隆的
+       * 按钮「减字」就能去掉。宿主改类名也不怕：交集是算出来的，不是写死的。
+       * @param {readonly Element[]} items 菜单里的所有项。
+       * @returns {Set<string>} 共有类名。
+       */
+      function sharedClasses(items) {
+        if (items.length === 0) return new Set()
+        let shared = new Set(items[0].classList)
+        for (const item of items.slice(1)) {
+          for (const name of [...shared]) {
+            if (!item.classList.contains(name)) shared.delete(name)
+          }
+        }
+        return shared
       }
 
       /** 菜单开着时，把三行的勾与文案同步到当前偏好。 */
@@ -1385,32 +1420,48 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
         const items = workspaceItems()
         const favorites = new Set(getFavorites())
         const filtered = prefs.favoritesOnly === true || prefs.recentOnly === true || prefs.latestOnly === true
-        const visible = filtered ? visibleWorkspaceIds(items, sessionSummaries(), favorites, prefs, Date.now()) : null
+        const result = filtered ? visibleWorkspaceIds(items, sessionSummaries(), favorites, prefs, Date.now()) : null
         const pathOf = new Map(items.map((item) => [item.workspaceId, item.path]))
-        // 被筛掉的项目底下的会话也要跟着藏。不属于任何项目的会话不受项目筛选影响。
-        const hiddenSessions = new Set()
-        if (visible !== null) {
+        // 会话只有在其项目**自己符合条件**时才显示：作为容器留下的父节点只负责
+        // 把子项目带出来，它自己的会话仍然藏起来。
+        const shownSessions = new Set()
+        if (result !== null) {
           for (const item of items) {
-            if (visible.has(item.workspaceId)) continue
-            for (const id of item.sessionIds ?? []) hiddenSessions.add(id)
+            if (!result.qualifying.has(item.workspaceId)) continue
+            for (const id of item.sessionIds ?? []) shownSessions.add(id)
           }
         }
-        for (const row of document.querySelectorAll(PROJECT_ROW)) {
+        const rows = [...document.querySelectorAll(ROW)]
+        for (const row of rows) {
           const key = row.getAttribute('data-row-key') ?? ''
-          const workspaceId = key.slice('workspace:'.length)
-          // 「未分组」桶不是项目：没有可收藏的路径，也就不参与筛选。
-          if (workspaceId === '') {
-            row.removeAttribute(FILTER_HIDDEN)
+          // 项目行：key 的尾部是工作区 id。
+          const item = items.find((one) => keyIsId(key, one.workspaceId))
+          if (item !== undefined) {
+            paintStar(row, favorites.has(pathOf.get(item.workspaceId)))
+            setHidden(row, result !== null && !result.visible.has(item.workspaceId))
             continue
           }
-          paintStar(row, favorites.has(pathOf.get(workspaceId)))
-          setHidden(row, visible !== null && !visible.has(workspaceId))
-        }
-        for (const row of document.querySelectorAll(SESSION_ROW)) {
-          const key = row.getAttribute('data-row-key') ?? ''
-          setHidden(row, hiddenSessions.has(key.slice('session:'.length)))
+          // 会话行：key 的尾部是会话 id。不属于任何项目的会话（游离会话）不受影响。
+          const sessionId = sessionIdOfKey(key)
+          if (sessionId === null) continue
+          setHidden(row, result !== null && !shownSessions.has(sessionId))
         }
         for (const surface of document.querySelectorAll(MENU_SURFACE)) injectFilters(surface)
+      }
+
+      /**
+       * 一行是不是会话行、它的会话 id 是什么。
+       *
+       * 认法：会话 id 来自会话快照（`ctx.get('sessions').list`），所以按 id 尾部
+       * 匹配即可 —— 不依赖 key 的前缀（宿主换过前缀了）。
+       * @param {string} key 行的 `data-row-key`。
+       * @returns {string|null} 会话 id，不是会话行则 null。
+       */
+      function sessionIdOfKey(key) {
+        for (const id of Object.keys(sessionSummaries())) {
+          if (keyIsId(key, id)) return id
+        }
+        return null
       }
 
       /** 合并短时间内的多次触发。 */
@@ -1429,7 +1480,7 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
        */
       function relevant(node) {
         if (node === null || typeof node !== 'object' || node.nodeType !== 1) return false
-        const selector = `${PROJECT_ROW},${SESSION_ROW},${MENU_SURFACE},[${FILTER_HIDDEN}]`
+        const selector = `${ROW},${MENU_SURFACE},[${FILTER_HIDDEN}]`
         if (typeof node.matches === 'function' && node.matches(selector)) return true
         return typeof node.querySelector === 'function' && node.querySelector(selector) !== null
       }
@@ -1507,7 +1558,7 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
        * 星号定位的纯逻辑部分：名字列的判定。DOM 部分在浏览器里，这里给冒烟检查
        * 一个可断言的入口 —— 位置判错过一次，值得钉住。
        */
-      star: { pickTextColumn },
+      star: { idOfKey, keyIsId },
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { zh: ZH, en: EN }), 'dsh-toomuch-plugins: dictionaries')
         const t = ctx.locale.bind(NS)
@@ -1887,6 +1938,17 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
             'div',
             { className: 'dsh-spc-set' },
             h('style', null, SET_CSS),
+            // ---- 项目筛选的两个数（0.4.0）--------------------------------
+            // 放在最上方：这两个数管的是「只看哪些项目」，比侧栏显示更常用。
+            // 下面那条分割线把它们与侧栏显示的设置隔开。
+            numberRow('recentDays', 'recentDays'),
+            numberRow('latestCount', 'latestCount'),
+            h(
+              'div',
+              { className: 'dsh-spc-setRow' },
+              h('span', { className: 'dsh-spc-setCaption' }, t('filterHint')),
+            ),
+            h('div', { className: 'dsh-spc-sep' }),
             h(
               'label',
               { className: 'dsh-spc-setToggle' },
@@ -2040,16 +2102,6 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
                     ),
               ]
             })(),
-            // ---- 项目筛选（0.4.0）------------------------------------------
-            // 三个开关本身在侧栏「视图选项 → 筛选会话」里；这里只放它们读的两个数。
-            h('div', { className: 'dsh-spc-sep' }),
-            numberRow('recentDays', 'recentDays'),
-            numberRow('latestCount', 'latestCount'),
-            h(
-              'div',
-              { className: 'dsh-spc-setRow' },
-              h('span', { className: 'dsh-spc-setCaption' }, t('filterHint')),
-            ),
           )
         }
 
