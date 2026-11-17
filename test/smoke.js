@@ -132,6 +132,7 @@ const KEYS = [
   'history', 'historyTitle', 'tabInstallRemove', 'tabEnableDisable', 'historyEmpty', 'historyUnavailable',
   'close', 'actionInstall', 'actionRemove', 'actionEnable', 'actionDisable',
   'favorite', 'filterFavorites', 'filterRecent', 'filterLatest', 'recentDays', 'latestCount', 'filterHint',
+  'filterSection',
 ]
 assert.deepStrictEqual(Object.keys(dicts.sidebarPanelCollapse.zh).sort(), [...KEYS].sort(), 'zh keys')
 assert.deepStrictEqual(Object.keys(dicts.sidebarPanelCollapse.en).sort(), [...KEYS].sort(), 'en keys')
@@ -1184,13 +1185,17 @@ assert.deepStrictEqual(
   [[1, 99], [1, 9]],
   'the inputs carry their own ceilings (99 days / 9 projects)',
 )
-// 两个数字框在页面的最上方：它们排在分割线之前，网格开关在分割线之后。
-const order = nodes.filter((n) => n.type === 'input' || hasCls(n, 'dsh-spc-sep'))
+// 页面的最上方：分组标题 → 两个数字框 → 分割线 → 网格开关。
+const order = nodes.filter((n) => n.type === 'input' || hasCls(n, 'dsh-spc-sep') || hasCls(n, 'dsh-spc-setHeading'))
 assert.deepStrictEqual(
-  order.map((n) => (n.type === 'input' ? (hasCls(n, 'dsh-spc-num') ? 'num' : 'checkbox') : 'sep')),
-  ['num', 'num', 'sep', 'checkbox'],
-  'the two filter numbers come first, then the rule, then the sidebar-display settings',
+  order.map((n) => (n.type === 'input'
+    ? (hasCls(n, 'dsh-spc-num') ? 'num' : 'checkbox')
+    : hasCls(n, 'dsh-spc-setHeading') ? 'heading' : 'sep')),
+  ['heading', 'num', 'num', 'sep', 'checkbox'],
+  'the heading comes first, then the two filter numbers, then the rule, then the sidebar-display settings',
 )
+const heading = nodes.find((n) => hasCls(n, 'dsh-spc-setHeading'))
+assert.ok(String(heading.children[0]).endsWith('.filterSection'), 'the heading is the filter section title')
 numberInputs[0].props.onChange({ target: { value: '30' } })
 assert.strictEqual(JSON.parse(store.get(prefsKey)).recentDays, 30, 'the day count persists')
 numberInputs[1].props.onChange({ target: { value: '99' } })

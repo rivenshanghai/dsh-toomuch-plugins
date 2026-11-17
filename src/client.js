@@ -147,6 +147,7 @@ window.__ModuleLoader__.load({
       recentDays: '「仅显示最近」的天数',
       latestCount: '「仅显示最新」的项目数',
       filterHint: '最近 / 最新按项目最后一个会话的活跃时间算',
+      filterSection: '工作区视图选项',
     }
     const EN = {
       collapse: 'Collapse global panels',
@@ -187,6 +188,7 @@ window.__ModuleLoader__.load({
       recentDays: 'Days counted as "recent"',
       latestCount: 'Projects kept by "latest"',
       filterHint: 'Recent / latest follow each project\'s last session activity',
+      filterSection: 'Workspace view options',
     }
 
     const CSS = `
@@ -268,6 +270,8 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
 .dsh-spc-setToggle{align-items:center;gap:10px;cursor:pointer;display:inline-flex;}
 .dsh-spc-setToggle input{accent-color:var(--dsw-alias-state-business-primary);flex:none;width:16px;height:16px;margin:0;}
 .dsh-spc-setRow{align-items:center;gap:10px;display:flex;min-height:28px;}
+/* 分组标题（如「工作区视图选项」）。 */
+.dsh-spc-setHeading{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:600;line-height:20px;}
 .dsh-spc-setCaption{color:var(--dsw-alias-label-secondary);}
 .dsh-spc-cols{gap:6px;display:flex;}
 .dsh-spc-col{cursor:pointer;min-width:32px;height:28px;color:var(--dsw-alias-label-primary);background:0 0;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-sm);padding:0 8px;font:inherit;display:inline-flex;align-items:center;justify-content:center;}
@@ -1941,6 +1945,7 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
             // ---- 项目筛选的两个数（0.4.0）--------------------------------
             // 放在最上方：这两个数管的是「只看哪些项目」，比侧栏显示更常用。
             // 下面那条分割线把它们与侧栏显示的设置隔开。
+            h('div', { className: 'dsh-spc-setHeading' }, t('filterSection')),
             numberRow('recentDays', 'recentDays'),
             numberRow('latestCount', 'latestCount'),
             h(

@@ -18,9 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   **「视图选项 → 筛选会话」里的三个项目筛选** —— 宿主的视图选项菜单多三个开关：「仅显示我的最爱项目」「仅显示最近 {n} 天」「仅显示最新 {m} 个项目」，选中打勾、不选没有勾。三者按**「与」**组合：开两个就只剩同时满足的项目。「最近 / 最新」看的是项目**最后一个会话的活跃时间**，不是注册时间；从来没有过会话的项目算最旧。被筛掉的项目连同它底下的会话行一起隐藏（平铺视图与搜索结果同样生效），不属于任何项目的会话不受影响。嵌套的工作区树视图里，父项目被筛掉时子项目也跟着隐藏，不会留下没有父行的孤儿行。点开关**不会关掉菜单** —— 用户通常要连着勾两个。
 
-- **The two numbers live at the top of the settings page** — the 「侧栏面板显示」 tab opens with two number fields: days for 「仅显示最近」 (1–99, default 7) and projects for 「仅显示最新」 (1–9, default 3), followed by a note explaining that recent / latest follow each project's last session activity. A divider separates them from the sidebar-display settings below. The three switches and both numbers persist in the existing display-preferences blob; out-of-range or corrupt values fall back to the defaults.
+- **The two numbers live at the top of the settings page** — the 「侧栏面板显示」 tab opens with a 「工作区视图选项」 heading, then two number fields: days for 「仅显示最近」 (1–99, default 7) and projects for 「仅显示最新」 (1–9, default 3), followed by a note explaining that recent / latest follow each project's last session activity. A divider separates them from the sidebar-display settings below. The three switches and both numbers persist in the existing display-preferences blob; out-of-range or corrupt values fall back to the defaults.
 
-  **两个数放在设置页最上方** —— 「侧栏面板显示」页一打开就是两个数字输入：「仅显示最近」的天数（1–99，默认 7）与「仅显示最新」的项目数（1–9，默认 3），下面一行说明「最近 / 最新按项目最后一个会话的活跃时间算」，再一条分割线把侧栏显示的设置隔到下面。三个开关和这两个数都存在原有的显示偏好里；越界或读坏的值一律回默认。
+  **两个数放在设置页最上方** —— 「侧栏面板显示」页一打开先是「工作区视图选项」这个分组标题，然后是两个数字输入：「仅显示最近」的天数（1–99，默认 7）与「仅显示最新」的项目数（1–9，默认 3），下面一行说明「最近 / 最新按项目最后一个会话的活跃时间算」，再一条分割线把侧栏显示的设置隔到下面。三个开关和这两个数都存在原有的显示偏好里；越界或读坏的值一律回默认。
 
 ### Fixed / 修复
 
