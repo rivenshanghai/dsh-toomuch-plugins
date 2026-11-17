@@ -27,6 +27,14 @@
  * tabs — installs and removals (all of them) and enable/disable toggles (the
  * last month) — filled from the host half's `spcHistory.list`.
  *
+ * 0.4.0 adds the workspace side: the project row's context menu gains a
+ * 「我的最爱」 entry (a switch), a starred project shows a yellow star after
+ * its name, and the host's 「视图选项 → 筛选会话」 menu gains three switches —
+ * only my favorites, only the last n days, only the latest m projects — that
+ * hide the project rows (and their session rows) that do not pass. The stars
+ * live in the host half's own file, the switches and the n / m numbers in
+ * localStorage.
+ *
  * Styling uses only `--dsw-alias-*` theme tokens and the stylesheet rides
  * inside the component, so unmounting removes it.
  */
@@ -132,6 +140,14 @@ window.__ModuleLoader__.load({
       actionRemove: '删除',
       actionEnable: '启用',
       actionDisable: '禁用',
+      favorite: '我的最爱',
+      filterFavorites: '仅显示我的最爱项目',
+      filterRecent: '仅显示最近 {n} 天',
+      filterLatest: '仅显示最新 {m} 个项目',
+      recentDays: '「仅显示最近」的天数',
+      latestCount: '「仅显示最新」的项目数',
+      filterHint: '最近 / 最新按项目最后一个会话的活跃时间算',
+      filterSection: '工作区视图选项',
     }
     const EN = {
       collapse: 'Collapse global panels',
@@ -165,6 +181,14 @@ window.__ModuleLoader__.load({
       actionRemove: 'Remove',
       actionEnable: 'Enable',
       actionDisable: 'Disable',
+      favorite: 'My favorites',
+      filterFavorites: 'Only my favorite projects',
+      filterRecent: 'Only the last {n} days',
+      filterLatest: 'Only the latest {m} projects',
+      recentDays: 'Days counted as "recent"',
+      latestCount: 'Projects kept by "latest"',
+      filterHint: 'Recent / latest follow each project\'s last session activity',
+      filterSection: 'Workspace view options',
     }
 
     const CSS = `
@@ -199,6 +223,18 @@ nav [data-spc-hidden]{display:none;}
    symbols carry a viewBox, so the drawing scales with the viewport. */
 nav.dsh-spc-size-sm :is(button,[role=button],[data-spc-adopted]) svg{width:12px !important;height:12px !important;}
 nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px !important;height:24px !important;}
+/* 工作区收藏：项目名旁边的黄星。宿主没有给项目行留装饰槽位，只能在行里插。
+   星号插成标签的后继兄弟，标签被脚本改成 flex:0 1 auto（只占内容宽度、可以被
+   压缩出省略号），于是名字短时星紧跟其后，名字长时标签先压缩、星仍然露着。 */
+.dsh-spc-star{align-items:center;color:var(--dsw-alias-state-warn-primary,#e8a33d);display:inline-flex;flex:none;}
+/* 注入到宿主「视图选项」菜单里的三个筛选开关。勾挂在菜单行末尾；没勾上时
+   整个元素隐藏（display:none 由 [data-off] 决定）。 */
+.dsh-spc-menuCheck{align-items:center;display:inline-flex;flex:none;margin-left:auto;}
+.dsh-spc-menuCheck[data-off]{display:none;}
+/* 设置页里「侧栏显示」与「项目筛选」之间的分割线。 */
+.dsh-spc-sep{border-top:.5px solid var(--dsw-alias-border-l3);margin:2px 0;}
+/* 被「仅显示…」筛掉的项目行与会话行。 */
+[data-spc-fhide]{display:none !important;}
 `
 
     /** Stylesheet of the plugin activity window (opened from the footer icon). */
@@ -234,6 +270,8 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
 .dsh-spc-setToggle{align-items:center;gap:10px;cursor:pointer;display:inline-flex;}
 .dsh-spc-setToggle input{accent-color:var(--dsw-alias-state-business-primary);flex:none;width:16px;height:16px;margin:0;}
 .dsh-spc-setRow{align-items:center;gap:10px;display:flex;min-height:28px;}
+/* 分组标题（如「工作区视图选项」）。 */
+.dsh-spc-setHeading{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:600;line-height:20px;}
 .dsh-spc-setCaption{color:var(--dsw-alias-label-secondary);}
 .dsh-spc-cols{gap:6px;display:flex;}
 .dsh-spc-col{cursor:pointer;min-width:32px;height:28px;color:var(--dsw-alias-label-primary);background:0 0;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-sm);padding:0 8px;font:inherit;display:inline-flex;align-items:center;justify-content:center;}
@@ -264,6 +302,9 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
    top line instead of floating in the middle of the list. */
 .dsh-spc-setRowDrop{align-items:flex-start;}
 .dsh-spc-setRowDrop .dsh-spc-setCaption{line-height:28px;}
+/* 「仅显示最近」天数 / 「仅显示最新」项目数的输入框。 */
+.dsh-spc-num{width:64px;height:28px;padding:0 6px;box-sizing:border-box;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-sm);font:inherit;}
+.dsh-spc-num:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px;}
 `
 
     /**
@@ -272,12 +313,22 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
      * entries (list mode) or the first `collapsedRows` rows (grid mode);
      * 0 collapses everything, the historical behaviour. `iconSize` scales
      * the row glyphs: sm/lg mark the nav, md leaves the sidebar's own size.
+     *
+     * The workspace filters (0.4.0) live in the same blob: three switches
+     * plus the two numbers they read (`recentDays`, `latestCount`).
      */
-    const DEFAULT_PREFS = { grid: false, columns: 3, collapsedCount: 0, collapsedRows: 0, order: [], iconSize: 'md' }
+    const DEFAULT_PREFS = {
+      grid: false, columns: 3, collapsedCount: 0, collapsedRows: 0, order: [], iconSize: 'md',
+      favoritesOnly: false, recentOnly: false, latestOnly: false, recentDays: 7, latestCount: 3,
+    }
     const COLLAPSED_COUNT_MAX = 5
     const COLLAPSED_ROWS_MAX = 3
     /** Custom display order: at most 20 panel ids, duplicates dropped on save. */
     const ORDER_MAX = 20
+    /** 「仅显示最近」的天数上限。 */
+    const RECENT_DAYS_MAX = 99
+    /** 「仅显示最新」的项目数上限。 */
+    const LATEST_COUNT_MAX = 9
 
     /** Coerce anything to a clean order list: strings only, deduped, ≤ 20. */
     function sanitizeOrder(value) {
@@ -291,6 +342,188 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
         if (out.length >= ORDER_MAX) break
       }
       return out
+    }
+
+    /**
+     * 清洗工作区筛选偏好：脏值与越界值一律回默认值。最近天数 1–99（默认 7），
+     * 最新项目数 1–9（默认 3），三个开关必须是严格的 `true` 才算打开。
+     * @param {unknown} raw 读回来的偏好片段。
+     * @returns {{favoritesOnly: boolean, recentOnly: boolean, latestOnly: boolean, recentDays: number, latestCount: number}} 干净的偏好。
+     */
+    function sanitizeFilterPrefs(raw) {
+      const source = raw !== null && typeof raw === 'object' ? raw : {}
+      const days = Math.trunc(Number(source.recentDays))
+      const count = Math.trunc(Number(source.latestCount))
+      return {
+        favoritesOnly: source.favoritesOnly === true,
+        recentOnly: source.recentOnly === true,
+        latestOnly: source.latestOnly === true,
+        recentDays: days >= 1 && days <= RECENT_DAYS_MAX ? days : DEFAULT_PREFS.recentDays,
+        latestCount: count >= 1 && count <= LATEST_COUNT_MAX ? count : DEFAULT_PREFS.latestCount,
+      }
+    }
+
+    /**
+     * 行 key 里的 id 部分。
+     *
+     * 宿主的 key 形态在变：`ws-<id>`（无冒号）、`session:<id>`、`session:session-<id>`。
+     * 统一取**最后一个冒号之后**的部分；没有冒号就取整串。这样 `ws-<uuid>` 与
+     * `session:session-<uuid>` 都能靠尾部对上各自的 id。
+     * @param {string} key 行的 `data-row-key`。
+     * @returns {string} key 里的 id 部分。
+     */
+    function idOfKey(key) {
+      const at = key.lastIndexOf(':')
+      return at === -1 ? key : key.slice(at + 1)
+    }
+
+    /**
+     * 某行是不是**这个 id** 的行。
+     *
+     * 用尾部匹配（`ws-<id>` / `session:<id>` 都以 id 结尾），但要求 id 前面是
+     * 分隔符而不是别的 id 的一部分 —— 否则一个以另一个 id 结尾的 id 会误判。
+     * @param {string} key 行的 `data-row-key`。
+     * @param {string} id 要找的 id。
+     * @returns {boolean} 是否是这一行。
+     */
+    function keyIsId(key, id) {
+      if (typeof id !== 'string' || id === '') return false
+      const tail = idOfKey(key)
+      if (!tail.endsWith(id)) return false
+      const before = tail.slice(0, tail.length - id.length)
+      // 前缀里若还有别的 id 字符，说明撞上了另一个 id。
+      return before === '' || !/[0-9a-z]/i.test(before.slice(-1))
+    }
+
+    /** 一天有多少毫秒。 */
+    const DAY_MS = 24 * 60 * 60 * 1000
+
+    /**
+     * 收藏的项目路径。Host 半边是唯一权威，这里只是它的只读镜像 ——
+     * 右键菜单、星号与筛选都读这一份，改的时候先问 Host。
+     */
+    let favoritePaths = []
+    const favoriteListeners = new Set()
+
+    /** 读当前收藏路径（只读）。 */
+    function getFavorites() {
+      return favoritePaths
+    }
+
+    /** 收藏变了：重画星号与筛选，菜单也重新解析。 */
+    function setFavorites(paths) {
+      favoritePaths = Array.isArray(paths) ? paths.filter((p) => typeof p === 'string' && p !== '') : []
+      for (const listener of favoriteListeners) listener()
+    }
+
+    /** 收藏的响应式来源，供右键菜单 `observe` 使用。 */
+    const favoritesSource = {
+      getSnapshot: () => favoritePaths,
+      subscribe: (listener) => {
+        favoriteListeners.add(listener)
+        return () => favoriteListeners.delete(listener)
+      },
+    }
+
+    /**
+     * 每个工作区的最后活跃时间（毫秒；没有会话记 0）。
+     * 「最近 / 最新」看的是**项目下最后一个会话的活跃时间**，不是工作区注册时间 ——
+     * 注册时间跟用户还在不在用这个项目没有关系。
+     * @param {readonly {workspaceId: string, sessionIds?: readonly string[]}[]} items 工作区列表。
+     * @param {Readonly<Record<string, {updatedAt?: number}>>} sessions 会话摘要表。
+     * @returns {Map<string, number>} 工作区 id -> 最后活跃时间。
+     */
+    function lastActivityByWorkspace(items, sessions) {
+      const out = new Map()
+      for (const item of items) {
+        let latest = 0
+        for (const id of item.sessionIds ?? []) {
+          const at = sessions?.[id]?.updatedAt
+          if (typeof at === 'number' && at > latest) latest = at
+        }
+        out.set(item.workspaceId, latest)
+      }
+      return out
+    }
+
+    /**
+     * 工作区在**工作区树**里的最近祖先（父是路径前缀目录）。
+     * @param {{workspaceId: string, path: string}} item 当前工作区。
+     * @param {readonly {workspaceId: string, path: string}[]} items 全部工作区。
+     * @returns {{workspaceId: string, path: string}|undefined} 最近的祖先工作区。
+     */
+    function ancestorWorkspace(item, items) {
+      let best
+      for (const other of items) {
+        if (other.workspaceId === item.workspaceId) continue
+        if (typeof other.path !== 'string' || typeof item.path !== 'string') continue
+        if (!item.path.startsWith(other.path)) continue
+        // 必须是目录边界：父路径后面跟的是分隔符，而不是同名的另一段。
+        const rest = item.path.slice(other.path.length)
+        if (!rest.startsWith('/') && !rest.startsWith('\\')) continue
+        if (best === undefined || other.path.length > best.path.length) best = other
+      }
+      return best
+    }
+
+    /**
+     * 当前筛选下**可见**的工作区 id。三个开关按「与」组合：同时打开时只剩
+     * 同时满足全部条件的项目。父项目被筛掉时子项目一起隐藏 —— 工作区树要保持
+     * 完整，不能留下没有父行的孤儿行。
+     * @param {readonly {workspaceId: string, path: string, sessionIds?: readonly string[]}[]} items 工作区列表。
+     * @param {Readonly<Record<string, {updatedAt?: number}>>} sessions 会话摘要表。
+     * @param {Iterable<string>} favorites 收藏的项目路径。
+     * @param {object} prefs 筛选偏好（会被清洗）。
+     * @param {number} now 当前时间（毫秒）。
+     * @returns {Set<string>} 可见的工作区 id。
+     */
+    /**
+     * 当前筛选下**可见**的工作区。
+     *
+     * 两个集合：
+     *  - `qualifying`：自己满足筛选条件的项目（收藏 / 最近 / 最新）。它们的会话
+     *    照常显示，可以打开。
+     *  - `visible`：行要显示出来的项目 = 符合条件的，加上**它们的后代所在的祖先**
+     *    —— 父节点要留着，子项目才不是孤儿行、也才点得开。祖先自己不符合条件，
+     *    所以它的会话不显示。
+     *
+     * 三个开关按「与」组合。
+     * @param {readonly {workspaceId: string, path: string, sessionIds?: readonly string[]}[]} items 工作区列表。
+     * @param {Readonly<Record<string, {updatedAt?: number}>>} sessions 会话摘要表。
+     * @param {Iterable<string>} favorites 收藏的项目路径。
+     * @param {object} prefs 筛选偏好（会被清洗）。
+     * @param {number} now 当前时间（毫秒）。
+     * @returns {{visible: Set<string>, qualifying: Set<string>}} 可见与符合条件的项目 id。
+     */
+    function visibleWorkspaceIds(items, sessions, favorites, prefs, now) {
+      const filter = sanitizeFilterPrefs(prefs)
+      const lastAt = lastActivityByWorkspace(items, sessions)
+      // 「仅显示最新 m 个」：按最后会话时间取前 m 个，时间并列时按路径稳定排序。
+      const ranked = [...items].sort((a, b) => {
+        const diff = (lastAt.get(b.workspaceId) ?? 0) - (lastAt.get(a.workspaceId) ?? 0)
+        if (diff !== 0) return diff
+        return String(a.path ?? '').localeCompare(String(b.path ?? ''))
+      })
+      const latest = new Set(ranked.slice(0, filter.latestCount).map((item) => item.workspaceId))
+      const cutoff = now - filter.recentDays * DAY_MS
+      const favoriteSet = favorites instanceof Set ? favorites : new Set(favorites ?? [])
+      const qualifying = new Set()
+      for (const item of items) {
+        const last = lastAt.get(item.workspaceId) ?? 0
+        if (filter.favoritesOnly && !favoriteSet.has(item.path)) continue
+        if (filter.recentOnly && (last === 0 || last < cutoff)) continue
+        if (filter.latestOnly && !latest.has(item.workspaceId)) continue
+        qualifying.add(item.workspaceId)
+      }
+      // 符合条件的项目的祖先也留着：树里不能出现没有父行的子行。
+      const visible = new Set(qualifying)
+      for (const item of items) {
+        if (!qualifying.has(item.workspaceId)) continue
+        for (let parent = ancestorWorkspace(item, items); parent !== undefined; parent = ancestorWorkspace(parent, items)) {
+          visible.add(parent.workspaceId)
+        }
+      }
+      return { visible, qualifying }
     }
 
     /** Cross-component sync: the settings page writes, the toggle re-applies. */
@@ -340,6 +573,7 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
               : DEFAULT_PREFS.collapsedRows,
           order: sanitizeOrder(parsed.order),
           iconSize: parsed.iconSize === 'sm' || parsed.iconSize === 'lg' ? parsed.iconSize : 'md',
+          ...sanitizeFilterPrefs(parsed),
         }
       } catch {
         return DEFAULT_PREFS
@@ -829,11 +1063,18 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
     /**
      * Client → host calls, hand-rolled Typert style (the dsh-cost-meter
      * pattern): strict-codec contributions the client mounts on `ctx.remote`,
-     * answered by the host half's `spcClicks.recordClick` (panel clicks) and
-     * `spcHistory.list` (the plugin activity log). The host side uses the
-     * gateway's src-descriptor fallback, so no generated zod manifest is
-     * needed anywhere.
+     * answered by the host half's `spcClicks.recordClick` (panel clicks),
+     * `spcHistory.list` (the plugin activity log) and `spcFavorites.list` /
+     * `spcFavorites.toggle` (the starred workspace projects). The host side
+     * uses the gateway's src-descriptor fallback, so no generated zod manifest
+     * is needed anywhere.
      */
+    const JSON_CODEC = (typeSymbol) => ({
+      mode: 'strict',
+      typeSymbol,
+      schema: { parse: (v) => v },
+      create: () => ({ parse: (v) => v }),
+    })
     const CLICK_CONTRIBUTION = {
       package: 'dsh-toomuch-plugins',
       face: 'host',
@@ -863,11 +1104,465 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
           parameters: [],
           result: { mode: 'strict', typeSymbol: 'dsh-toomuch-plugins#ActivityLog', schema: { parse: (v) => v }, create: () => ({ parse: (v) => v }) },
         },
+        {
+          id: 'dsh-toomuch-plugins#spcFavorites/list',
+          service: 'spcFavorites',
+          namespace: 'spcFavorites',
+          method: 'list',
+          invocation: { kind: 'direct' },
+          parameters: [],
+          result: JSON_CODEC('dsh-toomuch-plugins#Favorites'),
+        },
+        {
+          id: 'dsh-toomuch-plugins#spcFavorites/toggle',
+          service: 'spcFavorites',
+          namespace: 'spcFavorites',
+          method: 'toggle',
+          invocation: { kind: 'direct' },
+          parameters: [
+            { name: 'path', wire: 'path', source: 'json', codec: JSON_CODEC('dsh-toomuch-plugins#ProjectPath') },
+          ],
+          result: JSON_CODEC('dsh-toomuch-plugins#Favorites'),
+        },
       ],
     }
 
+    /* ------------------------------------------------------------------ *
+     * 工作区收藏与筛选的 DOM 层（0.4.0）
+     *
+     * 宿主没给这两处留扩展点，只能做增量：
+     *  - 项目行里没有装饰位 —— 星号插在项目名旁边；
+     *  - 「视图选项 → 筛选会话」是宿主写死的 items 数组 —— 三个开关克隆宿主自己的
+     *    菜单行插进去，配色、行高、悬停态都跟着宿主走。
+     *
+     * **行怎么认**：不靠 `data-row-key` 的前缀 —— 宿主把前缀从 `workspace:` 改成
+     * 过 `ws-`，前缀一变就全认不出来。改成**按 id 匹配**：工作区的 id 是知道的
+     * （工作区快照里有），行 key 的尾部就是这个 id（`ws-<id>` / `workspace:<id>`
+     * 都一样）。会话行同理。宿主再改前缀也不影响。
+     * ------------------------------------------------------------------ */
+
+    /** 所有带 key 的行。 */
+    const ROW = '[data-row-key]'
+    /** 被筛掉的行打这个标记（CSS 隐藏，可整批撤销）。 */
+    const FILTER_HIDDEN = 'data-spc-fhide'
+    /** 我们自己插的星号。 */
+    const STAR_ATTR = 'data-spc-star'
+    /** 菜单面板的稳定钩子（primitives 的 Menu 恒带）。 */
+    const MENU_SURFACE = '[data-menu-material]'
+    /** 我们插进视图选项菜单的那三行。 */
+    const FILTER_ROW = 'data-spc-filter'
+    /** 装饰重算的合并窗口：宿主重渲染与流式输出会连着触发很多次。 */
+    const DECORATE_DELAY_MS = 80
+
+    /** 菜单里的三个开关：kind -> 偏好键。 */
+    const FILTER_SWITCHES = [
+      { kind: 'favorites', key: 'favoritesOnly', label: (t) => t('filterFavorites') },
+      { kind: 'recent', key: 'recentOnly', label: (t) => t('filterRecent', { n: readPrefs().recentDays }) },
+      { kind: 'latest', key: 'latestOnly', label: (t) => t('filterLatest', { m: readPrefs().latestCount }) },
+    ]
+
+    /**
+     * 星号节点：一颗 12px 的星，颜色取主题的 warning 色（暗色主题下仍是黄的）。
+     * @returns {Element} 星号 `<span>`。
+     */
+    function starNode() {
+      const span = document.createElement('span')
+      span.className = 'dsh-spc-star'
+      span.setAttribute(STAR_ATTR, '')
+      span.setAttribute('aria-hidden', 'true')
+      span.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true">'
+        + '<path d="M8 1.7l1.9 3.85 4.25.62-3.07 3 .72 4.23L8 11.4l-3.8 2 .72-4.23-3.07-3 4.25-.62z"/></svg>'
+      return span
+    }
+
+    /** 右键菜单里的星号图标：实心 = 已收藏，空心 = 未收藏。 */
+    function starGlyph(filled) {
+      return h(
+        'svg',
+        {
+          viewBox: '0 0 16 16',
+          width: 16,
+          height: 16,
+          'aria-hidden': 'true',
+          fill: filled ? 'currentColor' : 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.5,
+          strokeLinejoin: 'round',
+          style: { display: 'block', color: 'var(--dsw-alias-state-warn-primary, currentColor)' },
+        },
+        h('path', { d: 'M8 1.9l1.83 3.71 4.1.6-2.97 2.89.7 4.08L8 11.25l-3.66 1.93.7-4.08-2.97-2.89 4.1-.6z' }),
+      )
+    }
+
+    /**
+     * 建立工作区收藏 / 筛选的 DOM 层：项目行上的星号、被筛掉的行、视图选项菜单里的
+     * 三个开关。所有触发器都只是「安排一次重算」，真正的计算合并在一个时间窗里跑。
+     * @param {object} ctx 客户端插件上下文。
+     * @param {(key: string, params?: object) => string} t 本插件的翻译函数。
+     * @returns {{refresh: () => void, dispose: () => void}} 手动重算与清理。
+     */
+    function createWorkspaceDecorations(ctx, t) {
+      let timer = null
+      let observer = null
+
+      /** 工作区快照里的项目行；读不到就当没有项目。 */
+      function workspaceItems() {
+        try {
+          const items = ctx.get('workspaces')?.list?.getSnapshot?.()?.items
+          return Array.isArray(items) ? items : []
+        } catch {
+          return []
+        }
+      }
+
+      /** 会话摘要表；读不到就当没有会话。 */
+      function sessionSummaries() {
+        try {
+          const byId = ctx.get('sessions')?.list?.getSnapshot?.()?.byId
+          return byId !== null && typeof byId === 'object' ? byId : {}
+        } catch {
+          return {}
+        }
+      }
+
+      /**
+       * 星号：插在项目名**旁边**，紧挨着名字。
+       *
+       * 宿主的项目行（v0.2.2-rc.3 实际跑的形态）：
+       * `<div class="bw-row bw-container-row" data-row-key="ws-<id>">`
+       * `  <span class="bw-chevron"/><span class="bw-row-icon"/>`
+       * `  <span class="bw-row-label" title="名字">名字</span>`
+       * `  <span class="bw-row-actions"/></div>`
+       *
+       * 标签（`.bw-row-label`）是 `flex:1 1 0%` 的块，里面带
+       * `overflow:hidden + ellipsis`。所以：
+       *  - 星**不能插进标签里** —— 名字长了会连着星一起被裁掉；
+       *  - 星**不能插在行尾** —— 标签的 `flex:1` 会把它挤到整行最右。
+       *
+       * 做法：星插成标签的**后继兄弟**，并把标签改成 `flex:0 1 auto`（只占内容
+       * 宽度、可以被压缩）。名字短时星紧跟其后；名字长时标签先压缩出省略号，
+       * 星仍然露在外面。
+       *
+       * 标签怎么认：不靠类名（构建期会变），而是**文本与整行相同的最深那个元素**
+       * —— 图标槽、箭头槽、动作区里的文字都跟整行对不上。
+       * @param {Element} row 项目行。
+       * @param {boolean} wanted 是否要显示星号。
+       */
+      function paintStar(row, wanted) {
+        const existing = row.querySelector(`[${STAR_ATTR}]`)
+        if (!wanted) {
+          if (existing !== null) existing.remove()
+          return
+        }
+        if (existing !== null) return
+        const label = labelOf(row)
+        if (label === null) return
+        // 标签只占内容宽度，可以被压缩出省略号 —— 星号才有位置留在旁边。
+        label.style.flex = '0 1 auto'
+        label.after(starNode())
+      }
+
+      /**
+       * 项目行里的**标签**元素（装着项目名的那一个）。
+       *
+       * 判据：行里**文字非空、且自己不含子元素**的元素，取 DOM 顺序第一个。
+       *  - 新版宿主：`<span class="bw-row-label" title="名字">名字</span>` ——
+       *    标签是纯文字、没有子元素；会话数徽标在它后面，靠 DOM 顺序排在后面。
+       *  - 旧版宿主：`<span class="projectText"><span class="title">名字</span>
+       *    </span>` —— 外层含子元素不算，内层的 `.title` 才是。
+       *
+       * **不能**用「文字等于整行文字」来判定：宿主会异步补一个会话数徽标，
+       * 整行文字随之改变，判定就失配 —— 新渲染的行会找不到标签、插不上星。
+       * @param {Element} row 项目行。
+       * @returns {Element|null} 标签元素，找不到则 null。
+       */
+      function labelOf(row) {
+        for (const el of row.querySelectorAll('*')) {
+          if (el.children.length > 0) continue
+          if ((el.textContent ?? '').trim() === '') continue
+          return el
+        }
+        return null
+      }
+
+      /** 显隐：加 / 去一个标记属性，样式由插件自己的样式表提供。 */
+      function setHidden(row, hidden) {
+        if (hidden) row.setAttribute(FILTER_HIDDEN, '')
+        else row.removeAttribute(FILTER_HIDDEN)
+      }
+
+      /**
+       * 克隆宿主的一行菜单项，改成我们的筛选开关。克隆来的行自带宿主的行高、内边距、
+       * 图标与悬停态，主题切换也跟着走。
+       * @param {Element} wrap 模板行的外层元素。
+       * @param {{kind: string, key: string, label: (t: Function) => string}} filter 开关定义。
+       * @returns {Element|null} 新的一行；模板结构对不上则 null。
+       */
+      function cloneFilterRow(wrap, filter, shared) {
+        const clone = wrap.cloneNode(true)
+        clone.setAttribute(FILTER_ROW, filter.kind)
+        const btn = clone.matches('button') ? clone : clone.querySelector('button')
+        if (btn === null) return null
+        // 模板的选中态与无障碍状态都要清掉：勾由我们自己画。
+        btn.removeAttribute('aria-current')
+        btn.removeAttribute('aria-disabled')
+        btn.removeAttribute('aria-describedby')
+        // 只留基础类：模板可能带着宿主的选中态类。
+        if (shared !== undefined) {
+          for (const name of [...btn.classList]) {
+            if (!shared.has(name)) btn.classList.remove(name)
+          }
+        }
+        // 模板行末的勾（宿主给已选中项画的）不能留：那是它自己那项的状态。
+        for (const svg of btn.querySelectorAll('svg')) {
+          if (svg.getAttribute('class') === null || svg.getAttribute('class').includes('check')) svg.remove()
+        }
+        // 模板的图标也不留：那是它那一项的图标（比如归档的箱子），与开关无关。
+        // 去掉后这一行没有图标位，文字靠左，与宿主无图标的条目一致。
+        for (const icon of btn.querySelectorAll('span')) {
+          if (icon.querySelector('svg') !== null) icon.remove()
+        }
+        const children = [...btn.children]
+        // 标签是「有文字的那个 span」；图标 span 里是 svg，没有文字。
+        const labelSpan = children.find((el) => (el.textContent ?? '').trim() !== '' && el.querySelector('svg') === null)
+        if (labelSpan === undefined) return null
+        labelSpan.textContent = filter.label(t)
+        labelSpan.setAttribute('data-spc-menu-label', '')
+        // 勾自己画一个：宿主只给「已选中」的行画勾，我们这三行是独立开关。
+        const check = document.createElement('span')
+        check.className = 'dsh-spc-menuCheck'
+        check.setAttribute('aria-hidden', 'true')
+        check.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" '
+          + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>'
+        btn.appendChild(check)
+        btn.setAttribute('aria-pressed', String(readPrefs()[filter.key] === true))
+        // 只切自己的开关，不关菜单：用户常常要连着勾两个。
+        btn.addEventListener('click', (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          const prefs = readPrefs()
+          writePrefs({ ...prefs, [filter.key]: prefs[filter.key] !== true })
+        })
+        return clone
+      }
+
+      /**
+       * 往「视图选项」菜单里插三个开关。
+       *
+       * 认法：宿主给 `type: 'label'` 的分组标题渲染成 `role="presentation"` 的行，
+       * 只有视图选项菜单有（分组 / 排序 / 筛选三个标题），会话右键菜单一个都没有。
+       * @param {Element} surface 菜单面板。
+       */
+      function injectFilters(surface) {
+        // 已经注入过：只同步勾的状态。宿主每次打开菜单都重建这一片 DOM，
+        // 克隆出来的行是新节点，勾的显隐得重新按偏好写一遍。
+        if (surface.querySelector(`[${FILTER_ROW}]`) !== null) {
+          syncFilterRows()
+          return
+        }
+        if (surface.querySelectorAll('[role="presentation"]').length < 2) return
+        const items = [...surface.querySelectorAll('button[role="menuitem"]')]
+        const template = items[items.length - 1]
+        if (template === undefined) return
+        const wrap = template.parentElement
+        // 模板可能是当前**选中**的那一项（宿主给它多加了选中态的类）。克隆时要把
+        // 「不是所有条目都有的类」去掉，否则三个开关会顶着宿主的选中态显示。
+        const shared = sharedClasses(items)
+        // 插到宿主条目所在的那一层容器里，而不是面板根上：条目外面若还有一层包裹，
+        // 插到根上就会落在包裹外面、撑不满一行。
+        const host = wrap === null ? null : wrap.parentElement
+        if (host === null || !surface.contains(host)) return
+        for (const filter of FILTER_SWITCHES) {
+          const row = cloneFilterRow(wrap, filter, shared)
+          if (row !== null) host.appendChild(row)
+        }
+        syncFilterRows()
+      }
+
+      /**
+       * 所有菜单项**都有**的类名（基础类）。
+       *
+       * 选中态的类只加在被选中的那一项上，所以交集里没有它 —— 用交集给克隆的
+       * 按钮「减字」就能去掉。宿主改类名也不怕：交集是算出来的，不是写死的。
+       * @param {readonly Element[]} items 菜单里的所有项。
+       * @returns {Set<string>} 共有类名。
+       */
+      function sharedClasses(items) {
+        if (items.length === 0) return new Set()
+        let shared = new Set(items[0].classList)
+        for (const item of items.slice(1)) {
+          for (const name of [...shared]) {
+            if (!item.classList.contains(name)) shared.delete(name)
+          }
+        }
+        return shared
+      }
+
+      /** 菜单开着时，把三行的勾与文案同步到当前偏好。 */
+      function syncFilterRows() {
+        const prefs = readPrefs()
+        for (const filter of FILTER_SWITCHES) {
+          for (const row of document.querySelectorAll(`[${FILTER_ROW}="${filter.kind}"]`)) {
+            const btn = row.matches('button') ? row : row.querySelector('button')
+            if (btn === null) continue
+            const check = btn.querySelector('.dsh-spc-menuCheck')
+            if (check !== null) {
+              if (prefs[filter.key] === true) check.removeAttribute('data-off')
+              else check.setAttribute('data-off', '')
+            }
+            btn.setAttribute('aria-pressed', String(prefs[filter.key] === true))
+            const labelSpan = btn.querySelector('[data-spc-menu-label]')
+            if (labelSpan !== null) labelSpan.textContent = filter.label(t)
+          }
+        }
+      }
+
+      /** 一次完整的重算：星号、被筛掉的行、菜单开关。 */
+      function apply() {
+        if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function' || document.body == null) return
+        const prefs = readPrefs()
+        const items = workspaceItems()
+        const favorites = new Set(getFavorites())
+        const filtered = prefs.favoritesOnly === true || prefs.recentOnly === true || prefs.latestOnly === true
+        const result = filtered ? visibleWorkspaceIds(items, sessionSummaries(), favorites, prefs, Date.now()) : null
+        const pathOf = new Map(items.map((item) => [item.workspaceId, item.path]))
+        // 会话只有在其项目**自己符合条件**时才显示：作为容器留下的父节点只负责
+        // 把子项目带出来，它自己的会话仍然藏起来。
+        const shownSessions = new Set()
+        if (result !== null) {
+          for (const item of items) {
+            if (!result.qualifying.has(item.workspaceId)) continue
+            for (const id of item.sessionIds ?? []) shownSessions.add(id)
+          }
+        }
+        const rows = [...document.querySelectorAll(ROW)]
+        for (const row of rows) {
+          const key = row.getAttribute('data-row-key') ?? ''
+          // 项目行：key 的尾部是工作区 id。
+          const item = items.find((one) => keyIsId(key, one.workspaceId))
+          if (item !== undefined) {
+            paintStar(row, favorites.has(pathOf.get(item.workspaceId)))
+            setHidden(row, result !== null && !result.visible.has(item.workspaceId))
+            continue
+          }
+          // 会话行：key 的尾部是会话 id。不属于任何项目的会话（游离会话）不受影响。
+          const sessionId = sessionIdOfKey(key)
+          if (sessionId === null) continue
+          setHidden(row, result !== null && !shownSessions.has(sessionId))
+        }
+        for (const surface of document.querySelectorAll(MENU_SURFACE)) injectFilters(surface)
+      }
+
+      /**
+       * 一行是不是会话行、它的会话 id 是什么。
+       *
+       * 认法：会话 id 来自会话快照（`ctx.get('sessions').list`），所以按 id 尾部
+       * 匹配即可 —— 不依赖 key 的前缀（宿主换过前缀了）。
+       * @param {string} key 行的 `data-row-key`。
+       * @returns {string|null} 会话 id，不是会话行则 null。
+       */
+      function sessionIdOfKey(key) {
+        for (const id of Object.keys(sessionSummaries())) {
+          if (keyIsId(key, id)) return id
+        }
+        return null
+      }
+
+      /** 合并短时间内的多次触发。 */
+      function schedule() {
+        if (timer !== null || typeof setTimeout !== 'function') return
+        timer = setTimeout(() => {
+          timer = null
+          apply()
+        }, DECORATE_DELAY_MS)
+      }
+
+      /**
+       * 一个节点是否可能影响装饰（是它自己，或被它包着）。
+       * @param {Node|null} node 待判定的节点。
+       * @returns {boolean} 是否需要重算。
+       */
+      function relevant(node) {
+        if (node === null || typeof node !== 'object' || node.nodeType !== 1) return false
+        const selector = `${ROW},${MENU_SURFACE},[${FILTER_HIDDEN}]`
+        if (typeof node.matches === 'function' && node.matches(selector)) return true
+        return typeof node.querySelector === 'function' && node.querySelector(selector) !== null
+      }
+
+      /**
+       * 一个节点是否是「我们插进去的星号」。React 重建项目行时会把它连同整段
+       * children 一起删掉 —— 它不认这颗星。看到它被移除就要重画一次补回来。
+       * @param {Node|null} node 待判定的节点。
+       * @returns {boolean} 是否是星号（或含星号的子树）。
+       */
+      function isStar(node) {
+        if (node === null || typeof node !== 'object' || node.nodeType !== 1) return false
+        if (typeof node.matches === 'function' && node.matches(`[${STAR_ATTR}]`)) return true
+        return typeof node.querySelector === 'function' && node.querySelector(`[${STAR_ATTR}]`) !== null
+      }
+
+      const unsubscribers = [subscribePrefs(schedule), favoritesSource.subscribe(schedule)]
+      for (const name of ['workspaces', 'sessions']) {
+        try {
+          const source = ctx.get(name)?.list
+          if (source !== undefined && typeof source.subscribe === 'function') unsubscribers.push(source.subscribe(schedule))
+        } catch {
+          // 没有这个服务：筛选就没有数据可算，其余功能照旧。
+        }
+      }
+      if (typeof MutationObserver === 'function' && typeof document !== 'undefined' && document.body != null) {
+        observer = new MutationObserver((records) => {
+          for (const record of records) {
+            for (const node of record.addedNodes) {
+              if (relevant(node)) {
+                schedule()
+                return
+              }
+            }
+            // 宿主重建项目行时会把我们插进去的星号一起删掉：它不在 React 的
+            // children 计划里。看到星号消失就重画一次补回来。
+            for (const node of record.removedNodes) {
+              if (isStar(node)) {
+                schedule()
+                return
+              }
+            }
+          }
+        })
+        observer.observe(document.body, { childList: true, subtree: true })
+      }
+      schedule()
+
+      return {
+        refresh: schedule,
+        dispose() {
+          if (timer !== null && typeof clearTimeout === 'function') clearTimeout(timer)
+          timer = null
+          if (observer !== null) observer.disconnect()
+          observer = null
+          for (const off of unsubscribers) {
+            try {
+              off()
+            } catch {
+              // 已经摘掉了。
+            }
+          }
+        },
+      }
+    }
+
     return {
-      inject: ['slots', 'locale', 'remote'],
+      inject: ['slots', 'locale', 'remote', 'contextMenus', 'workspaces', 'sessions'],
+      /**
+       * 纯计算部分（不碰 DOM）给冒烟检查一个入口：收藏筛选的判定有分支、有边界，
+       * 值得单独断言，而不是只能靠手动点侧栏。
+       */
+      filter: { sanitizeFilterPrefs, lastActivityByWorkspace, ancestorWorkspace, visibleWorkspaceIds },
+      /**
+       * 星号定位的纯逻辑部分：名字列的判定。DOM 部分在浏览器里，这里给冒烟检查
+       * 一个可断言的入口 —— 位置判错过一次，值得钉住。
+       */
+      star: { idOfKey, keyIsId },
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { zh: ZH, en: EN }), 'dsh-toomuch-plugins: dictionaries')
         const t = ctx.locale.bind(NS)
@@ -878,6 +1573,7 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
         // just keeps working without counts and without the activity window).
         let clickRpc = null
         let historyRpc = null
+        let favoritesRpc = null
         ctx.effect(() => {
           if (ctx.remote === undefined || typeof ctx.remote.$mount !== 'function') return undefined
           let cancelled = false
@@ -891,6 +1587,9 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
               dispose = d
               clickRpc = ctx.get('remote.spcClicks')
               historyRpc = ctx.get('remote.spcHistory')
+              favoritesRpc = ctx.get('remote.spcFavorites')
+              // 收藏的权威在 Host 半边：挂上远程后先读一次。
+              if (favoritesRpc !== null && favoritesRpc !== undefined) loadFavorites()
             })
             .catch(() => {
               // Mount failed: counts stay off, nothing else to clean up.
@@ -899,6 +1598,7 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
             cancelled = true
             clickRpc = null
             historyRpc = null
+            favoritesRpc = null
             if (dispose !== null) {
               try {
                 dispose()
@@ -908,6 +1608,53 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
             }
           }
         }, 'dsh-toomuch-plugins: click remote')
+
+        /** 远程返回的 `{ ok, value }` 信封拆出 payload；不是信封就原样返回。 */
+        function payloadOf(result) {
+          return result !== null && typeof result === 'object' && 'ok' in result
+            ? result.ok === true
+              ? result.value
+              : null
+            : result
+        }
+
+        /**
+         * 从 Host 半边读一次收藏列表。读不到就保持空 —— 星号与筛选是尽力而为的
+         * 装饰，Host 半边的远程不可用时侧栏其余部分照常工作。
+         */
+        function loadFavorites() {
+          if (favoritesRpc === null || favoritesRpc === undefined) return
+          Promise.resolve(favoritesRpc.list())
+            .then((result) => {
+              const payload = payloadOf(result)
+              if (payload !== null && Array.isArray(payload.paths)) setFavorites(payload.paths)
+            })
+            .catch(() => {
+              // 读失败：收藏保持当前镜像，不影响其他功能。
+            })
+        }
+
+        /**
+         * 切换一个项目的收藏。Host 是权威，成功后用 Host 返回的完整列表覆盖本地镜像；
+         * 远程不可用时只翻本地镜像 —— 这次点击会随刷新消失，但界面不会假装没反应。
+         * @param {string} path 项目绝对路径。
+         */
+        async function toggleFavorite(path) {
+          if (typeof path !== 'string' || path === '') return
+          if (favoritesRpc === null || favoritesRpc === undefined) {
+            const next = new Set(getFavorites())
+            if (next.has(path)) next.delete(path)
+            else next.add(path)
+            setFavorites([...next])
+            return
+          }
+          try {
+            const payload = payloadOf(await favoritesRpc.toggle(path))
+            if (payload !== null && Array.isArray(payload.paths)) setFavorites(payload.paths)
+          } catch {
+            // 写入失败：收藏状态保持原样。
+          }
+        }
 
         ctx.effect(() => {
           if (typeof document === 'undefined') return undefined
@@ -921,6 +1668,47 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
           document.addEventListener('click', onClick)
           return () => document.removeEventListener('click', onClick)
         }, 'dsh-toomuch-plugins: click count')
+
+        // ---- 我的最爱：项目右键菜单的第一行 --------------------------------
+        // order 50 排在宿主「重命名」（100）前面，所以它永远是第一行。
+        // observe 挂上收藏来源：菜单开着时星标改了，菜单会自己重解析。
+        ctx.effect(() => {
+          if (ctx.contextMenus === undefined || typeof ctx.contextMenus.register !== 'function') return undefined
+          const off = ctx.contextMenus.register({
+            id: 'workspace.favorite',
+            target: 'workspace',
+            order: 50,
+            observe: () => [favoritesSource],
+            resolve: ({ path }) => {
+              const starred = typeof path === 'string' && getFavorites().includes(path)
+              return [
+                {
+                  id: 'favorite',
+                  label: t('favorite'),
+                  icon: { key: starred ? 'workspace.favoriteOn' : 'workspace.favoriteOff' },
+                  run: () => toggleFavorite(path),
+                },
+              ]
+            },
+          })
+          return typeof off === 'function' ? off : undefined
+        }, 'dsh-toomuch-plugins: favorite menu')
+
+        // 菜单图标按 key 从 keyed 槽里取，所以先注册两枚星（实心 / 空心）。
+        if (ctx.slots !== undefined && typeof ctx.slots.inject === 'function') {
+          ctx.slots.inject('contextMenu.icon', function* () {
+            yield ctx.slots.register({ name: 'contextMenu.icon', key: 'workspace.favoriteOn' }, () => starGlyph(true))
+            yield ctx.slots.register({ name: 'contextMenu.icon', key: 'workspace.favoriteOff' }, () => starGlyph(false))
+          })
+        }
+
+        // 星号、筛选、菜单开关三件事都靠这一份 DOM 层：它自己订阅偏好、收藏与
+        // 工作区 / 会话快照，宿主重渲染时靠 MutationObserver 重算。
+        const decorations = createWorkspaceDecorations(ctx, t)
+        ctx.effect(() => {
+          decorations.refresh()
+          return () => decorations.dispose()
+        }, 'dsh-toomuch-plugins: workspace decorations')
 
         /**
          * The plugin activity window. The footer icon fires OPEN_EVENT; the
@@ -1127,10 +1915,45 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
               ),
               hintKey === undefined ? null : h('span', { className: 'dsh-spc-setCaption' }, t(hintKey)),
             )
+          // 一个带上下限的数字项（「仅显示最近」的天数、「仅显示最新」的项目数）。
+          // 输入越界立刻夹回范围内，空值 / 非数字不动 —— 用户清空重打时不该跳回默认。
+          const numberRow = (prefKey, labelKey) =>
+            h(
+              'div',
+              { className: 'dsh-spc-setRow' },
+              h('span', { className: 'dsh-spc-setCaption' }, t(labelKey)),
+              h('input', {
+                type: 'number',
+                className: 'dsh-spc-num',
+                min: 1,
+                max: prefKey === 'recentDays' ? RECENT_DAYS_MAX : LATEST_COUNT_MAX,
+                step: 1,
+                value: String(prefs[prefKey]),
+                onChange: (event) => {
+                  const next = Math.trunc(Number(event.target.value))
+                  if (!Number.isFinite(next)) return
+                  const max = prefKey === 'recentDays' ? RECENT_DAYS_MAX : LATEST_COUNT_MAX
+                  update({ [prefKey]: Math.min(max, Math.max(1, next)) })
+                },
+              }),
+              h('span', { className: 'dsh-spc-setCaption' }, `1–${prefKey === 'recentDays' ? RECENT_DAYS_MAX : LATEST_COUNT_MAX}`),
+            )
           return h(
             'div',
             { className: 'dsh-spc-set' },
             h('style', null, SET_CSS),
+            // ---- 项目筛选的两个数（0.4.0）--------------------------------
+            // 放在最上方：这两个数管的是「只看哪些项目」，比侧栏显示更常用。
+            // 下面那条分割线把它们与侧栏显示的设置隔开。
+            h('div', { className: 'dsh-spc-setHeading' }, t('filterSection')),
+            numberRow('recentDays', 'recentDays'),
+            numberRow('latestCount', 'latestCount'),
+            h(
+              'div',
+              { className: 'dsh-spc-setRow' },
+              h('span', { className: 'dsh-spc-setCaption' }, t('filterHint')),
+            ),
+            h('div', { className: 'dsh-spc-sep' }),
             h(
               'label',
               { className: 'dsh-spc-setToggle' },

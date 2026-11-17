@@ -1,7 +1,7 @@
 /**
  * Host half of the dsh-toomuch-plugins bundle; the Client module owns the UI.
  *
- * It serves two small Typert services to the browser:
+ * It serves three small Typert services to the browser:
  *
  *  - `spcClicks` counts how often each sidebar panel entry is clicked. The
  *    Client half reports clicks over a hand-rolled Typert remote (see
@@ -12,10 +12,15 @@
  *
  *  - `spcHistory` reads the plugin activity log (see src/history.js): what was
  *    installed, removed, enabled or disabled, and when.
+ *
+ *  - `spcFavorites` keeps the starred workspace projects (see
+ *    src/favorites.js): the project directories the user marked as favorites,
+ *    stored as a plain list of absolute paths.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { readFavorites, toggleFavorite } from './favorites.js'
 import { createRecorder, SYNC_INTERVAL_MS } from './history.js'
 
 /** Typert service key; also its namespace (client mounts against it). */
@@ -24,6 +29,9 @@ const NAMESPACE = 'spcClicks'
 /** Service key of the plugin activity log. */
 const HISTORY_SERVICE_KEY = 'spcHistory'
 const HISTORY_NAMESPACE = 'spcHistory'
+/** Service key of the workspace favorites. */
+const FAVORITES_SERVICE_KEY = 'spcFavorites'
+const FAVORITES_NAMESPACE = 'spcFavorites'
 /** Prototype marker the Typert gateway reads to discover remote methods. */
 const REMOTE_METHODS = '@deepseek-ai/dsh-typert-protocol/remote-methods'
 
@@ -94,6 +102,19 @@ export function apply(ctx) {
     },
   })
   ctx.provide(SERVICE_KEY, clicks)
+
+  // The workspace favorites: which project directories the user starred. The
+  // paths live in the plugin's own file, so the stars survive a browser
+  // change and a reinstall of the plugin itself.
+  const favorites = remoteService(FAVORITES_SERVICE_KEY, FAVORITES_NAMESPACE, ['list', 'toggle'], {
+    list() {
+      return { paths: readFavorites() }
+    },
+    toggle(path) {
+      return { paths: toggleFavorite(path) }
+    },
+  })
+  ctx.provide(FAVORITES_SERVICE_KEY, favorites)
 
   // The plugin activity log. Plugin changes are detected by comparing the
   // profile with what was recorded last time, on a timer and whenever the
