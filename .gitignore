@@ -23,3 +23,6 @@ docs/npm-publish-playbook.md
 
 # npm cache used when publishing from a read-only-home sandbox
 .npm-cache/
+
+# 临时发布正文（gh release create --notes-file 用，用完即删）
+.release-notes-*.md
