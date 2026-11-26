@@ -23,7 +23,7 @@ It ships one plugin today:
 
 | Plugin | What it does |
 | --- | --- |
-| Sidebar panel collapse | Collapses the "global panels" column above the workspace into one toggle in the sidebar footer, plus a display settings page |
+| Sidebar panel collapse | Collapses the "global panels" column above the workspace into one toggle in the sidebar footer; the settings page in the left nav tunes entry display and the project filters (last n days / latest m) |
 | Workspace favorites and filters | Star projects from their context menu (a yellow star in the sidebar) and filter the project list by favorites / recency |
 
 ## Why
@@ -48,7 +48,7 @@ entries**, and bring it back when you need it.
   the display of the list element the sidebar already renders.
 - **Themed** with `--dsw-alias-*` tokens only, so it follows the DSH theme.
 - **Rail-friendly** — in the narrow 56px rail the toggle becomes a round icon button.
-- **Grid display** — in Settings → Built-in plugins, switch the entry list to icons
+- **Grid display** — in Settings (left nav → Sidebar panel display), switch the entry list to icons
   only (panel names become hover tooltips) with 2–4 icons per row. Bundles that skip
   the panel-list slot and inject their own sidebar buttons (the `data-dsh-*-entry`
   convention, e.g. 今日值得读 / 全局搜索 / 容器) are adopted into the grid too, and
@@ -105,7 +105,7 @@ entries**, and bring it back when you need it.
   its **parent directory** along, so the child is never an orphan row; the parent
   is only a container and its own sessions stay hidden.
 - **The two numbers sit at the top of the settings page** — a 「工作区视图选项」
-  group in the 「侧栏面板显示」 tab (Settings → Built-in plugins): the days for
+  group in the 「侧栏面板显示」 section (Settings left nav): the days for
   "only the last n days" (1–99) and the project count for "only the latest m
   projects" (1–9).
 - **Off by default** — grid mode is opt-in; the preference lives in `localStorage`
@@ -123,7 +123,7 @@ Grid display — icons only, panel names as hover tooltips, 2–4 icons per row:
 
 ![Sidebar panel list in grid display mode](docs/grid-dsh-toomuch-plugins.png)
 
-The "Sidebar panel display" settings page (Settings → Built-in plugins) — grid
+The "Sidebar panel display" settings page (Settings left nav) — grid
 mode, icons per row, and how many rows stay visible while collapsed:
 
 ![Sidebar panel display settings page](docs/grid-setup-dsh-toomuch-plugins.png)
@@ -165,8 +165,8 @@ From the plugin market, once listed: open **Settings → Plugin Market** in DSH 
 search for `dsh-toomuch-plugins`.
 
 **Verify:** the sidebar footer gains a "Collapse global panels / Expand global
-panels" row above "settings", and the global panel column is gone. Settings →
-Built-in plugins gains a "Sidebar panel display" page for grid mode,
+panels" row above "settings", and the global panel column is gone. Settings
+(left nav) gains a "Sidebar panel display" page for grid mode,
 icons-per-row, how many entries (list) or rows (grid) stay visible while
 collapsed, the custom plugin display order (up to 20 entries), and the icon
 size (small / medium / large).
@@ -187,8 +187,8 @@ Requirements: DSH (DeepSeek Harness) with a `web` profile; Node.js ≥ 20.
 2. walks up from its own root node to find the sidebar root's direct `<nav>` child —
    the global panel list — and toggles its `display`;
 3. remembers the choice in `localStorage`;
-4. registers a settings page through the `settings.plugins.tab` slot (Settings →
-   Built-in plugins) where grid mode, the 2–4 icons-per-row choice and the
+4. registers a settings page through the `settings.section` slot (the Settings left
+   nav rail) where grid mode, the 2–4 icons-per-row choice and the
    three icon sizes (small / medium / large) live;
 5. applies grid mode to the same `<nav>`: a marker class plus a columns CSS
    variable, the label span hidden, and each entry's `aria-label` mirrored into

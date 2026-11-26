@@ -126,7 +126,7 @@ mod.apply(ctx)
 
 // Dictionaries: both locales carry every key the components look up.
 const KEYS = [
-  'collapse', 'expand', 'tab', 'grid', 'columns', 'collapsedCount', 'collapsedRows', 'collapsedHint',
+  'collapse', 'expand', 'section', 'grid', 'columns', 'collapsedCount', 'collapsedRows', 'collapsedHint',
   'iconSize', 'sizeSm', 'sizeMid', 'sizeLg', 'sizeHint',
   'orderTitle', 'orderPick', 'orderHint', 'orderEmpty', 'orderUp', 'orderDown', 'orderRemove',
   'history', 'historyTitle', 'tabInstallRemove', 'tabEnableDisable', 'historyEmpty', 'historyUnavailable',
@@ -140,7 +140,7 @@ assert.deepStrictEqual(Object.keys(dicts.sidebarPanelCollapse.en).sort(), [...KE
 // Both slots register exactly once, with the expected metadata.
 assert.deepStrictEqual(
   injected.sort(),
-  ['contextMenu.icon', 'settings.plugins.tab', 'shell.overlay', 'sidebar.footer.action'],
+  ['contextMenu.icon', 'settings.section', 'shell.overlay', 'sidebar.footer.action'],
   'slots injected',
 )
 const footer = registrations.find((r) => r.entry.name === 'sidebar.footer.action')
@@ -149,14 +149,17 @@ assert.deepStrictEqual(
   { id: 'sidebar-panel-collapse', order: 5, locale: 'sidebarPanelCollapse' },
   'footer registration',
 )
-const tab = registrations.find((r) => r.entry.name === 'settings.plugins.tab')
+// The settings page hangs off `settings.section` — the Settings panel's own
+// left nav rail. The old `settings.plugins.tab` slot no longer exists in the
+// running DSH, which is why the page disappeared from the UI.
+const section = registrations.find((r) => r.entry.name === 'settings.section')
 assert.deepStrictEqual(
-  { id: tab.entry.id, order: tab.entry.order, locale: tab.entry.locale },
-  { id: 'sidebar-display', order: 100, locale: 'sidebarPanelCollapse' },
-  'tab registration',
+  { id: section.entry.id, order: section.entry.order, locale: section.entry.locale },
+  { id: 'sidebar-display', order: 40, locale: 'sidebarPanelCollapse' },
+  'section registration',
 )
-assert.strictEqual(typeof tab.entry.label, 'function', 'tab label is a function')
-assert.ok(tab.entry.label().includes('tab'), 'tab label resolves through t()')
+assert.strictEqual(typeof section.entry.label, 'function', 'section label is a function')
+assert.ok(section.entry.label().includes('section'), 'section label resolves through t()')
 
 // The activity window is registered in the shell overlay.
 const overlay = registrations.find((r) => r.entry.name === 'shell.overlay')
@@ -354,7 +357,7 @@ function flatten(node, out = []) {
   return out
 }
 
-const renderTab = () => flatten(tab.component())
+const renderSection = () => flatten(section.component())
 const prefsKey = 'dsh.sidebar-panel-collapse.display'
 // Safe class access: the react stub may hand back props=null (e.g. style).
 const hasCls = (n, token) =>
@@ -362,7 +365,7 @@ const hasCls = (n, token) =>
   n.props.className.split(' ').includes(token)
 
 // Buttons of the picker row whose caption ends with the given locale key
-// (the settings tab uses ctx-bound t(), e.g. "sidebarPanelCollapse.columns").
+// (the settings section uses ctx-bound t(), e.g. "sidebarPanelCollapse.columns").
 const pickButtons = (nodes, key) => {
   const row = nodes.find(
     (n) => hasCls(n, 'dsh-spc-setRow') &&
@@ -376,7 +379,7 @@ const pickButtons = (nodes, key) => {
 }
 
 // Defaults: grid off, list-mode collapsed-count picker (0-5, nothing shown).
-let nodes = renderTab()
+let nodes = renderSection()
 assert.strictEqual(nodes.find((n) => n.type === 'input' && n.props.type === 'checkbox').props.checked, false, 'grid off by default')
 const countBtns = pickButtons(nodes, 'collapsedCount')
 assert.deepStrictEqual(countBtns.map((n) => n.children[0]), ['0', '1', '2', '3', '4', '5'], 'collapsed-count options 0-5')
@@ -397,7 +400,7 @@ assert.deepStrictEqual(
   { grid: true, columns: 3, collapsedCount: 0, collapsedRows: 0, order: [], iconSize: 'md', favoritesOnly: false, recentOnly: false, latestOnly: false, recentDays: 7, latestCount: 3 },
   'writePrefs',
 )
-nodes = renderTab()
+nodes = renderSection()
 assert.strictEqual(nodes.find((n) => n.type === 'input' && n.props.type === 'checkbox').props.checked, true, 'grid on after write')
 const cols = pickButtons(nodes, 'columns')
 assert.deepStrictEqual(cols.map((n) => n.children[0]), ['2', '3', '4'], 'column options 2-4')
@@ -413,14 +416,14 @@ assert.deepStrictEqual(
   { grid: true, columns: 4, collapsedCount: 0, collapsedRows: 0, order: [], iconSize: 'md', favoritesOnly: false, recentOnly: false, latestOnly: false, recentDays: 7, latestCount: 3 },
   'columns=4 persisted',
 )
-pickButtons(renderTab(), 'collapsedRows').find((n) => n.children[0] === '2').props.onClick()
+pickButtons(renderSection(), 'collapsedRows').find((n) => n.children[0] === '2').props.onClick()
 assert.deepStrictEqual(
   JSON.parse(store.get(prefsKey)),
   { grid: true, columns: 4, collapsedCount: 0, collapsedRows: 2, order: [], iconSize: 'md', favoritesOnly: false, recentOnly: false, latestOnly: false, recentDays: 7, latestCount: 3 },
   'collapsedRows=2 persisted',
 )
 store.set(prefsKey, '{"grid":true,"columns":9,"collapsedRows":9}')
-nodes = renderTab()
+nodes = renderSection()
 assert.strictEqual(
   pickButtons(nodes, 'columns').find((n) => hasCls(n, 'dsh-spc-colOn')).children[0],
   '3',
@@ -434,7 +437,7 @@ assert.strictEqual(
 
 // Corrupt JSON falls back to safe defaults instead of throwing.
 store.set(prefsKey, 'not json')
-nodes = renderTab()
+nodes = renderSection()
 assert.strictEqual(nodes.find((n) => n.type === 'input' && n.props.type === 'checkbox').props.checked, false, 'corrupt -> grid off')
 assert.strictEqual(pickButtons(nodes, 'columns'), null, 'corrupt -> no column picker')
 assert.strictEqual(
@@ -446,7 +449,7 @@ assert.strictEqual(
 // --- icon size ------------------------------------------------------------
 // Three choices with localized captions; medium (the sidebar's own size) is
 // the default, unknown stored values fall back to it.
-nodes = renderTab()
+nodes = renderSection()
 const sizeBtns = pickButtons(nodes, 'iconSize')
 assert.deepStrictEqual(
   sizeBtns.map((n) => n.children[0]),
@@ -461,7 +464,7 @@ assert.deepStrictEqual(
 sizeBtns[2].props.onClick()
 assert.strictEqual(JSON.parse(store.get(prefsKey)).iconSize, 'lg', 'iconSize=lg persisted')
 store.set(prefsKey, '{"iconSize":"xl"}')
-nodes = renderTab()
+nodes = renderSection()
 assert.strictEqual(
   pickButtons(nodes, 'iconSize').find((n) => hasCls(n, 'dsh-spc-colOn')).children[0],
   'sidebarPanelCollapse.sizeMid',
@@ -481,7 +484,7 @@ const captionHas = (nodes, key) =>
       n.children.some((c) => c && c.type === 'span' && String(c.children[0]).endsWith('.' + key)),
   )
 
-nodes = renderTab()
+nodes = renderSection()
 // The picker is drawn by the page, not by the browser: a native <select>
 // popup cannot follow the theme (unreadable rows in dark mode) and its
 // invisible popup swallowed the click and the wheel, which left the settings
@@ -507,15 +510,15 @@ const pickPanel = (list, label) => {
 }
 pickPanel(nodes, '市场')
 assert.deepStrictEqual(JSON.parse(store.get(prefsKey)).order, ['market'], 'first add stored')
-nodes = renderTab()
+nodes = renderSection()
 pickPanel(nodes, '市场')
 assert.deepStrictEqual(JSON.parse(store.get(prefsKey)).order, ['market'], 'duplicate add dropped on save')
-nodes = renderTab()
+nodes = renderSection()
 pickPanel(nodes, '插件')
 assert.deepStrictEqual(JSON.parse(store.get(prefsKey)).order, ['market', 'plugins'], 'second add stored')
 
 // Ordered rows render in list order with up/down/remove controls.
-nodes = renderTab()
+nodes = renderSection()
 let rows = orderRowNodes(nodes)
 assert.deepStrictEqual(rows.map((r) => r.children.find((c) => c.type === 'span').children[0]), ['1. 市场', '2. 插件'], 'rows in list order')
 const rowBtns = (row) => flatten(row).filter((n) => hasCls(n, 'dsh-spc-col'))
@@ -527,7 +530,7 @@ assert.strictEqual(rowBtns(rows[0])[0].props.disabled, true, 'first row cannot m
 assert.strictEqual(rowBtns(rows[1])[1].props.disabled, true, 'last row cannot move down')
 rowBtns(rows[1])[0].props.onClick() // move "插件" up
 assert.deepStrictEqual(JSON.parse(store.get(prefsKey)).order, ['plugins', 'market'], 'move up stored')
-nodes = renderTab()
+nodes = renderSection()
 rowBtns(orderRowNodes(nodes)[0])[2].props.onClick() // remove "插件"
 assert.deepStrictEqual(JSON.parse(store.get(prefsKey)).order, ['market'], 'remove stored')
 
@@ -536,13 +539,13 @@ store.set(prefsKey, JSON.stringify({
   grid: false, columns: 3, collapsedCount: 0, collapsedRows: 0,
   order: [...Array.from({ length: 19 }, (_, i) => `p${i}`), 'market', 'market'],
 }))
-nodes = renderTab()
+nodes = renderSection()
 assert.strictEqual(orderRowNodes(nodes).length, 20, 'stored list sanitizes to 20 unique entries')
 assert.strictEqual(nodes.find((n) => hasCls(n, 'dsh-spc-dropBtn')).props.disabled, true, 'dropdown disabled at the cap')
 
 // Corrupt / wrongly-typed order values fall back to the empty list.
 store.set(prefsKey, '{"grid":false,"columns":3,"collapsedCount":0,"collapsedRows":0,"order":"plugins"}')
-nodes = renderTab()
+nodes = renderSection()
 assert.strictEqual(orderRowNodes(nodes).length, 0, 'non-array order -> default')
 assert.ok(captionHas(nodes, 'orderEmpty'), 'non-array order -> default hint')
 
@@ -770,7 +773,7 @@ assert.deepStrictEqual(
   [false, false, true],
   'collapsed limit sees the adopted row in visual order',
 )
-nodes = renderTab()
+nodes = renderSection()
 assert.deepStrictEqual(
   dropItems(nodes).map((n) => n.children[0]),
   ['插件', '市场', '日程', '今日值得读'],
@@ -1172,7 +1175,7 @@ await favoriteActions[0].run()
 assert.deepStrictEqual(favoritePaths, [], 'running it again unstars the project')
 
 // 设置页：分割线之后是「仅显示最近」的天数与「仅显示最新」的项目数。
-nodes = renderTab()
+nodes = renderSection()
 const numberInputs = nodes.filter((n) => n.type === 'input' && hasCls(n, 'dsh-spc-num'))
 assert.strictEqual(numberInputs.length, 2, 'two filter numbers in the settings page')
 assert.deepStrictEqual(numberInputs.map((n) => n.props.value), ['7', '3'], 'defaults are 7 days / 3 projects')

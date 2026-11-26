@@ -11,9 +11,10 @@
  * localStorage, so it survives reloads. It only touches the list element the
  * sidebar already renders — no panel, workspace or host behaviour changes.
  *
- * It also ships a display settings page (Settings → Built-in plugins, via the
- * `settings.plugins.tab` slot): turn on grid display so the panel list shows
- * icons only with the label as a hover tooltip, pick how many icons fit per
+ * It also ships a display settings page (the Settings panel's own left nav
+ * rail, via the `settings.section` slot): turn on grid display so the panel
+ * list shows icons only with the label as a hover tooltip, pick how many
+ * icons fit per
  * row (2–4), pick one of three icon sizes (small / medium / large), and set a
  * custom plugin display order (up to 20 entries, added one by one from a
  * dropdown; duplicates are dropped on save). Panel clicks
@@ -111,7 +112,7 @@ window.__ModuleLoader__.load({
     const ZH = {
       collapse: '收起全局面板',
       expand: '展开全局面板',
-      tab: '侧栏面板显示',
+      section: '侧栏面板显示',
       grid: '网格方式显示（只显示图标，文字放悬停提示）',
       columns: '每行图标数量',
       collapsedCount: '收起时显示插件数',
@@ -152,7 +153,7 @@ window.__ModuleLoader__.load({
     const EN = {
       collapse: 'Collapse global panels',
       expand: 'Expand global panels',
-      tab: 'Sidebar panel display',
+      section: 'Sidebar panel display',
       grid: 'Grid display (icons only, labels as hover tooltips)',
       columns: 'Icons per row',
       collapsedCount: 'Entries shown while collapsed',
@@ -1857,11 +1858,11 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
         }
 
         /**
-         * The display settings page, mounted as this plugin's tab in the
-         * Plugins settings section. It only edits localStorage; the footer
-         * toggle's effect pushes the result onto the live panel list.
+         * The display settings page, mounted as this plugin's entry in the
+         * Settings panel's left nav rail. It only edits localStorage; the
+         * footer toggle's effect pushes the result onto the live panel list.
          */
-        function DisplaySettingsTab() {
+        function DisplaySettingsSection() {
           const [prefs, setPrefsState] = React.useState(readPrefs)
           React.useEffect(() => subscribePrefs(() => setPrefsState(readPrefs())), [])
           // The plugin-order dropdown is drawn by the page (a native <select>
@@ -2124,15 +2125,17 @@ nav.dsh-spc-size-lg :is(button,[role=button],[data-spc-adopted]) svg{width:24px 
           order: 60,
           locale: NS,
         }, ActivityWindow))
-        // Settings → Built-in plugins, where feature plugins own their pages
-        // (the read-only inventory registers its own tab the same way).
-        ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
-          name: 'settings.plugins.tab',
+        // The Settings panel's own left nav rail: one entry per feature-owned
+        // settings page. The old 'settings.plugins.tab' slot (a tab inside the
+        // Plugins section) is gone in this DSH build, so the page hangs off
+        // this slot instead — the section id stays 'sidebar-display'.
+        ctx.slots.inject('settings.section', () => ctx.slots.register({
+          name: 'settings.section',
           id: 'sidebar-display',
-          order: 100,
-          label: () => t('tab'),
+          order: 40,
+          label: () => t('section'),
           locale: NS,
-        }, DisplaySettingsTab))
+        }, DisplaySettingsSection))
       },
     }
   },

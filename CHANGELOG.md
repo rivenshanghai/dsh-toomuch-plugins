@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 0.4.1 (2026-11-26)
+
+### Fixed / 修复
+
+- **The settings page moved to the Settings left nav** — the plugin used to register its display settings page into the `settings.plugins.tab` slot (the 「内置插件 / Built-in plugins」 tab area). That slot is **gone** in the current DSH build, so the page silently stopped rendering and there was nowhere left to configure the plugin. The page now registers into the `settings.section` slot instead — the Settings panel's own **left nav rail**, where it shows up as a 「侧栏面板显示 / Sidebar panel display」 entry (same section id `sidebar-display`, same content, same preferences). Nothing else moved: the sidebar footer toggle, the plugin activity window, the workspace favorites and the project filters are untouched.
+
+  **设置页搬到设置的左侧菜单** —— 插件原来把显示设置页注册在 `settings.plugins.tab` 槽（「内置插件」那个标签页区）。当前这版 DSH 里**已经没有这个槽**了，于是设置页悄悄不渲染，用户连地方都没有了。现在改注册到 `settings.section` 槽 —— 设置面板自己的**左侧菜单**，作为「侧栏面板显示」一项出现（section id 仍是 `sidebar-display`，内容与偏好都不变）。其余部分没动：侧栏底部的开关、插件操作记录窗口、工作区收藏与项目筛选都照旧。
+
+### Changed / 变更
+
+- **The plugin description now covers both configuration groups** — the marketplace line and the README feature table used to say only that the global panel entries collapse into one toggle (plus a vague "display settings page"). They now also state what the Settings left nav configures: **entry display** (icons-only grid, icon size, order, how many entries stay visible while collapsed) and **project filters** (favorites only, last n days, latest m). Description only — no behaviour change. / **插件描述补上那两组配置** —— 市场里那行原来只说「收成一个开关」，现在补上设置的左侧菜单里能调的两组：**入口显示方式**（纯图标网格、图标尺寸、顺序、收起保留数）与**项目筛选**（只看最爱、最近 n 天、最新 m 个）。只改描述，不改行为。
+
 ## 0.4.0 (2026-11-13)
 
 ### Added / 新增
